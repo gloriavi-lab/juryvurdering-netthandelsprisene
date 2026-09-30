@@ -1,0 +1,6 @@
+.streamlit/secrets.toml
+butikkliste.json
+.DS_Store
+venv/
+__pycache__/
+*.pyc
