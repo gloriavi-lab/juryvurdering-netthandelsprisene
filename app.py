@@ -8,8 +8,8 @@ hovedappen ble treg av å håndtere 1000 butikker og mange faner i ett
 og samme Google Sheet.
 
 Arbeidsflyt:
-1. Fase 1 gjøres i et eget Excel-ark (utenfor denne appen). Resultatet
-   (butikkliste + Klasse/Bransje/URL) lastes opp her i sidepanelet.
+1. Fase 1 gjøres i et eget Excel-ark (utenfor denne appen). Topp ~50
+   derfra lastes opp her (sidepanelet) som butikklisten for fasen.
 2. Hvert jurymedlem skriver navnet sitt og velger sitt fagfelt (samme
    5 kategorier som i Fase 1).
 3. Jurymedlemmet vurderer butikkene på KUN sitt fagfelt, med akkurat
@@ -19,9 +19,13 @@ Arbeidsflyt:
    ark). Appen skriver KUN raden(e) for butikken som akkurat ble
    lagret – aldri hele arket – slik at manuelle endringer gjort
    direkte i Google Sheets alltid overlever og vises i appen.
+5. "Finale"-fanen rangerer butikkene (snitt av alle registrerte
+   ekspertscorer) gruppert på størrelsesklasse, og viser alle
+   kommentarer som er lagt inn – til bruk når finalistene skal pekes ut.
 """
 
 import re
+from collections import defaultdict
 from datetime import datetime
 
 import gspread
@@ -30,6 +34,26 @@ import streamlit as st
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Ekspertvurdering – Netthandelsprisene", page_icon="🎓", layout="wide")
+
+st.markdown("""
+<style>
+.stApp { background-color: #FFFFFF; }
+section[data-testid="stSidebar"] > div { background-color: #FFFFFF !important; border-right: 1px solid #E8E6E2; }
+div[data-testid="stExpander"] { background-color: white; border-radius: 8px; border: 1px solid #E8E6E2; }
+.main-header { background: #212121; color: white; padding: 16px 28px; border-radius: 10px; margin-bottom: 20px; display: flex; align-items: center; gap: 16px; }
+.logo-badge { background: #C8102E; color: white; padding: 5px 12px; border-radius: 4px; font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.5px; }
+.klasse-card { background: #F8F7F5; border-radius: 10px; padding: 18px 20px; border-top: 4px solid #C8102E; height: 100%; }
+.klasse-card h4 { margin: 0 0 6px 0; }
+.klasse-card .belop { color: #555; font-size: 14px; }
+.kat-pill { display: inline-block; background: #C8102E; color: white; font-weight: 700; padding: 6px 16px; border-radius: 20px; font-size: 14px; margin-bottom: 10px; }
+.kat-card { background: #F8F7F5; border-radius: 10px; padding: 16px 18px; margin-bottom: 14px; border: 1px solid #E8E6E2; }
+.kat-card ul { margin: 6px 0 0 0; padding-left: 20px; }
+.kat-card li { margin-bottom: 4px; color: #333; }
+.finale-rad { background: #F8F7F5; border-radius: 10px; padding: 14px 18px; margin-bottom: 10px; border-left: 4px solid #C8102E; }
+.finale-plass { font-weight: 800; font-size: 20px; color: #C8102E; margin-right: 10px; }
+.snitt-badge { background: #212121; color: white; padding: 3px 10px; border-radius: 6px; font-size: 13px; font-weight: 600; }
+</style>
+""", unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # Kriterier – IDENTISK ordlyd som i Fase 1-arket (5 kategorier, 16 kriterier)
@@ -53,8 +77,27 @@ KRITERIER = [
     ("Innovasjon", "Kommersielt håndverk"),
 ]
 FAGFELT = list(dict.fromkeys(kat for kat, _ in KRITERIER))
-KRITERIER_PER_FAGFELT = {
-    kat: [krit for k, krit in KRITERIER if k == kat] for kat in FAGFELT
+KRITERIER_PER_FAGFELT = {kat: [krit for k, krit in KRITERIER if k == kat] for kat in FAGFELT}
+
+# Størrelsesklasser – definisjon avtalt med oppdragsgiver
+KLASSE_DEFINISJON = [
+    ("Liten", "Under 50 mill kr"),
+    ("Medium", "50–250 mill kr"),
+    ("Stor", "Over 250 mill kr"),
+]
+KLASSER = [k for k, _ in KLASSE_DEFINISJON]
+
+# Forslag til fagfelt per jurymedlem (brukes kun til å forhåndsvelge i dropdown –
+# jurymedlemmet kan alltid overstyre selv). Matcher på om navnet DE skriver inn
+# inneholder nøkkelordet (små bokstaver), så "Ole Johan H." treffer "ole johan".
+JURY_FAGFELT_FORSLAG = {
+    "ole johan": "Førsteinntrykk",
+    "stian": "Kundeservice & Tilgjengelighet",
+    "torkel": "Kjøp/inspirasjon/personalisering",
+    "marte": "Kjøp/inspirasjon/personalisering",
+    "vikki": "Markedsføring/kundedialog",
+    "nicholas": "Markedsføring/kundedialog",
+    "guro": "Innovasjon",
 }
 
 VURDERINGER_HEADER = ["Butikk", "Jurymedlem", "Fagfelt", "Kriterium", "Score", "Kommentar", "Sist oppdatert"]
@@ -82,9 +125,7 @@ def last_lokalt():
 
 
 # ─────────────────────────────────────────────
-# Google Sheets – egen, liten regneark. Samme secrets-mønster som hovedappen
-# (gcp_service_account kan gjenbrukes – bare del et NYTT ark med samme
-# tjenestekonto og legg inn dets ID under [google_sheets] sheet_id).
+# Google Sheets – eget, lite regneark
 # ─────────────────────────────────────────────
 @st.cache_resource(ttl=3600, show_spinner=False)
 def _gc_klient():
@@ -138,7 +179,6 @@ def lagre_vurderinger_batch(sh, butikk, jurymedlem, fagfelt, vurderinger):
     ikke blir overskrevet av appen."""
     ws = hent_vurderinger_ark(sh)
     rå = ws.get_all_values()
-    header = rå[0] if rå else VURDERINGER_HEADER
     rader = rå[1:] if rå else []
     nokkel_til_rad = {}
     for i, rad in enumerate(rader, start=2):
@@ -222,15 +262,47 @@ def les_fase1_liste(opplastet_fil):
 
 
 # ─────────────────────────────────────────────
-# UI
+# Finale – aggregering av alle registrerte ekspertscorer
 # ─────────────────────────────────────────────
-st.title("🎓 Ekspertvurdering – Netthandelsprisene")
-st.caption("Fase 2 · egen, lett app – uavhengig av hoved-/screeningappen")
+def beregn_finale_data(alle_rader, butikkliste):
+    """Returnerer:
+    - snitt_per_butikk: {butikk: (snittscore, antall_scorer)}
+    - detaljer_per_butikk: {butikk: [(fagfelt, kriterium, score, kommentar, jurymedlem), ...]}
+    Bruker ALLE registrerte vurderinger uansett jurymedlem – finalen skal reflektere
+    summen av ekspertenes vurderinger, ikke kun én person sine."""
+    detaljer = defaultdict(list)
+    scorer = defaultdict(list)
+    if len(alle_rader) > 1:
+        for rad in alle_rader[1:]:
+            if len(rad) < 6:
+                continue
+            butikk, jurymedlem, fagfelt, kriterium, score, kommentar = rad[:6]
+            try:
+                score_num = float(score)
+            except (ValueError, TypeError):
+                continue
+            scorer[butikk].append(score_num)
+            detaljer[butikk].append((fagfelt, kriterium, score_num, kommentar, jurymedlem))
+    snitt = {b: (sum(v) / len(v), len(v)) for b, v in scorer.items()}
+    return snitt, detaljer
+
+
+# ─────────────────────────────────────────────
+# UI – sidepanel (felles for alle faner)
+# ─────────────────────────────────────────────
+st.markdown(
+    '<div class="main-header"><span class="logo-badge">Netthandelsprisene</span>'
+    '<span style="font-size:20px;font-weight:700;">🎓 Ekspertvurdering – Fase 2</span></div>',
+    unsafe_allow_html=True,
+)
 
 sh = koble_sheets()
 
 with st.sidebar:
-    st.header("⚙️ Oppsett")
+    side = st.radio("Naviger", ["📖 Oversikt", "✍️ Vurdering", "🏆 Finale"], label_visibility="collapsed")
+    st.markdown("---")
+
+    st.subheader("⚙️ Oppsett")
     if sh:
         st.success("✅ Koblet til Google Sheets")
         st.markdown(f"[📊 Åpne arket]({sh.url})")
@@ -260,77 +332,181 @@ with st.sidebar:
             st.success(f"✅ {len(ny_liste)} butikker lastet inn!")
             st.rerun()
 
-if not sh:
-    st.warning("Google Sheets-tilkoblingen mangler. Sjekk `secrets` (se README for oppsett) før vurderinger kan lagres.")
-    st.stop()
+butikkliste = st.session_state.get("butikkliste")
 
-if not st.session_state.get("butikkliste"):
-    st.info("💡 Last opp Fase 1-Excel-fila i sidepanelet til venstre for å komme i gang.")
-    st.stop()
 
-butikkliste = st.session_state.butikkliste
+# ─────────────────────────────────────────────
+# Side: Oversikt
+# ─────────────────────────────────────────────
+def vis_oversikt():
+    st.header("📖 Kriterier og retningslinjer")
+    st.caption("Samme kriterier som i Fase 1 – hvert kriterium vurderes fra 1 til 5 stjerner (1 = svak, 5 = utmerket), med mulighet for å legge inn en kommentar.")
 
-col1, col2 = st.columns(2)
-with col1:
-    jurynavn = st.text_input("Ditt navn (jurymedlem)", value=st.session_state.get("_jurynavn", ""))
-    st.session_state["_jurynavn"] = jurynavn
-with col2:
-    fagfelt_valgt = st.selectbox("Ditt fagfelt (kategorien du er ekspert på)", FAGFELT)
+    st.subheader("Størrelsesklasser")
+    kol = st.columns(3)
+    for c, (klasse, belop) in zip(kol, KLASSE_DEFINISJON):
+        c.markdown(f'<div class="klasse-card"><h4>{klasse}</h4><div class="belop">{belop}</div></div>', unsafe_allow_html=True)
 
-if not jurynavn:
-    st.warning("Skriv inn navnet ditt for å begynne å vurdere.")
-    st.stop()
+    st.markdown("")
+    st.subheader("Kriterier per fagfelt")
+    kol2 = st.columns(len(FAGFELT))
+    for c, kat in zip(kol2, FAGFELT):
+        punkter = "".join(f"<li>{krit}</li>" for krit in KRITERIER_PER_FAGFELT[kat])
+        c.markdown(
+            f'<div class="kat-card"><span class="kat-pill">{kat}</span><ul>{punkter}</ul></div>',
+            unsafe_allow_html=True,
+        )
 
-kriterier_denne = KRITERIER_PER_FAGFELT[fagfelt_valgt]
+    st.markdown("")
+    st.subheader("Veien til finalen")
+    st.markdown(
+        "- **Fase 1:** Alle nominerte butikker vurderes av juryen. Topp ca. 50 (etter snittscore) går videre.\n"
+        "- **Fase 2 – Ekspertvurdering:** Hvert jurymedlem vurderer butikkene på sitt eget fagfelt.\n"
+        "- **Finale:** Butikker som har vært gjennom *både* Fase 1 og Fase 2 rangeres etter snittscore, "
+        "og de beste per størrelsesklasse (Liten / Medium / Stor) blir finalister."
+    )
 
-alle_rader = hent_vurderinger(sh)
-mine_vurderinger = {}
-if len(alle_rader) > 1:
-    for rad in alle_rader[1:]:
-        if len(rad) >= 6 and rad[1] == jurynavn:
-            mine_vurderinger[(rad[0], rad[3])] = {"score": rad[4], "kommentar": rad[5]}
 
-sok = st.text_input("🔍 Søk etter butikk", "")
-navn_liste = sorted(butikkliste.keys())
-if sok:
-    navn_liste = [n for n in navn_liste if sok.lower() in n.lower()]
+# ─────────────────────────────────────────────
+# Side: Vurdering
+# ─────────────────────────────────────────────
+def vis_vurdering(sh, butikkliste):
+    st.header("✍️ Vurdering")
 
-antall_fullfort = sum(
-    1 for n in butikkliste
-    if all((n, krit) in mine_vurderinger for krit in kriterier_denne)
-)
-st.caption(f"**{fagfelt_valgt}** · {antall_fullfort} av {len(butikkliste)} butikker fullført av deg")
-st.progress(antall_fullfort / len(butikkliste) if butikkliste else 0)
+    if not sh:
+        st.warning("Google Sheets-tilkoblingen mangler – sjekk `secrets` i sidepanelet før vurderinger kan lagres.")
+        return
+    if not butikkliste:
+        st.info("💡 Last opp Fase 1-Excel-fila i sidepanelet til venstre for å komme i gang.")
+        return
 
-for navn in navn_liste:
-    info = butikkliste[navn]
-    alt_ferdig = all((navn, krit) in mine_vurderinger for krit in kriterier_denne)
-    merke = "✅ " if alt_ferdig else ""
-    with st.expander(f"{merke}**{navn}** — {info.get('klasse', '–')} · {info.get('bransje', '–')}"):
-        if info.get("url"):
-            st.markdown(f"🌐 [Besøk nettbutikk]({info['url']})")
-        st.markdown("---")
-        for krit in kriterier_denne:
-            eksisterende = mine_vurderinger.get((navn, krit), {})
-            kc1, kc2 = st.columns([1, 3])
-            with kc1:
-                score = st.select_slider(
-                    krit, [1, 2, 3, 4, 5],
-                    value=int(eksisterende.get("score") or 3),
-                    format_func=lambda x: "⭐" * x,
-                    key=f"score_{navn}_{krit}",
-                    label_visibility="collapsed",
-                )
-            with kc2:
-                st.text_input(
-                    "Kommentar", value=eksisterende.get("kommentar", ""),
-                    key=f"kom_{navn}_{krit}", label_visibility="collapsed", placeholder=krit,
-                )
-        if st.button("💾 Lagre vurdering for denne butikken", key=f"lagre_{navn}"):
-            vurderinger = [
-                (krit, st.session_state.get(f"score_{navn}_{krit}", 3), st.session_state.get(f"kom_{navn}_{krit}", ""))
-                for krit in kriterier_denne
-            ]
-            lagre_vurderinger_batch(sh, navn, jurynavn, fagfelt_valgt, vurderinger)
-            st.success(f"Lagret vurdering for {navn}!")
-            st.rerun()
+    col1, col2 = st.columns(2)
+    with col1:
+        jurynavn = st.text_input("Ditt navn (jurymedlem)", value=st.session_state.get("_jurynavn", ""))
+        st.session_state["_jurynavn"] = jurynavn
+    with col2:
+        forslag = next((v for k, v in JURY_FAGFELT_FORSLAG.items() if k in jurynavn.lower()), FAGFELT[0])
+        fagfelt_valgt = st.selectbox(
+            "Ditt fagfelt (kategorien du er ekspert på)", FAGFELT,
+            index=FAGFELT.index(forslag),
+        )
+
+    if not jurynavn:
+        st.warning("Skriv inn navnet ditt for å begynne å vurdere.")
+        return
+
+    kriterier_denne = KRITERIER_PER_FAGFELT[fagfelt_valgt]
+
+    alle_rader = hent_vurderinger(sh)
+    mine_vurderinger = {}
+    if len(alle_rader) > 1:
+        for rad in alle_rader[1:]:
+            if len(rad) >= 6 and rad[1] == jurynavn:
+                mine_vurderinger[(rad[0], rad[3])] = {"score": rad[4], "kommentar": rad[5]}
+
+    sok = st.text_input("🔍 Søk etter butikk", "")
+    navn_liste = sorted(butikkliste.keys())
+    if sok:
+        navn_liste = [n for n in navn_liste if sok.lower() in n.lower()]
+
+    antall_fullfort = sum(1 for n in butikkliste if all((n, krit) in mine_vurderinger for krit in kriterier_denne))
+    st.caption(f"**{fagfelt_valgt}** · {antall_fullfort} av {len(butikkliste)} butikker fullført av deg")
+    st.progress(antall_fullfort / len(butikkliste) if butikkliste else 0)
+
+    for navn in navn_liste:
+        info = butikkliste[navn]
+        alt_ferdig = all((navn, krit) in mine_vurderinger for krit in kriterier_denne)
+        merke = "✅ " if alt_ferdig else ""
+        with st.expander(f"{merke}**{navn}** — {info.get('klasse', '–')} · {info.get('bransje', '–')}"):
+            if info.get("url"):
+                st.markdown(f"🌐 [Besøk nettbutikk]({info['url']})")
+            st.markdown("---")
+            for krit in kriterier_denne:
+                eksisterende = mine_vurderinger.get((navn, krit), {})
+                st.markdown(f"**{krit}**")
+                kc1, kc2 = st.columns([1, 2])
+                with kc1:
+                    score = st.select_slider(
+                        "Score", [1, 2, 3, 4, 5],
+                        value=int(eksisterende.get("score") or 3),
+                        format_func=lambda x: "⭐" * x,
+                        key=f"score_{navn}_{krit}",
+                        label_visibility="collapsed",
+                    )
+                with kc2:
+                    st.text_area(
+                        "Kommentar", value=eksisterende.get("kommentar", ""),
+                        key=f"kom_{navn}_{krit}", label_visibility="collapsed",
+                        placeholder="Skriv en kommentar (valgfritt)…", height=68,
+                    )
+                st.markdown("")
+            if st.button("💾 Lagre vurdering for denne butikken", key=f"lagre_{navn}"):
+                vurderinger = [
+                    (krit, st.session_state.get(f"score_{navn}_{krit}", 3), st.session_state.get(f"kom_{navn}_{krit}", ""))
+                    for krit in kriterier_denne
+                ]
+                lagre_vurderinger_batch(sh, navn, jurynavn, fagfelt_valgt, vurderinger)
+                st.success(f"Lagret vurdering for {navn}!")
+                st.rerun()
+
+
+# ─────────────────────────────────────────────
+# Side: Finale
+# ─────────────────────────────────────────────
+def vis_finale(sh, butikkliste):
+    st.header("🏆 Finale")
+    st.caption("Rangering basert på snitt av alle registrerte ekspertvurderinger (Fase 2), gruppert per størrelsesklasse.")
+
+    if not sh:
+        st.warning("Google Sheets-tilkoblingen mangler – sjekk `secrets` i sidepanelet.")
+        return
+    if not butikkliste:
+        st.info("💡 Last opp Fase 1-Excel-fila i sidepanelet til venstre for å se Finale-rangeringen (klasse hentes derfra).")
+        return
+
+    antall_per_klasse = st.number_input("Antall finalister som vises per klasse", min_value=1, max_value=20, value=3)
+
+    alle_rader = hent_vurderinger(sh)
+    snitt, detaljer = beregn_finale_data(alle_rader, butikkliste)
+
+    if not snitt:
+        st.info("Ingen vurderinger registrert ennå.")
+        return
+
+    for klasse in KLASSER:
+        st.subheader(f"Klasse: {klasse}")
+        butikker_i_klasse = [
+            (navn, snitt[navn][0], snitt[navn][1])
+            for navn in butikkliste
+            if butikkliste[navn].get("klasse") == klasse and navn in snitt
+        ]
+        butikker_i_klasse.sort(key=lambda x: x[1], reverse=True)
+        topp = butikker_i_klasse[:antall_per_klasse]
+
+        if not topp:
+            st.caption("Ingen vurderte butikker i denne klassen ennå.")
+            continue
+
+        for plass, (navn, snittscore, antall) in enumerate(topp, start=1):
+            st.markdown(
+                f'<div class="finale-rad"><span class="finale-plass">#{plass}</span>'
+                f'<strong>{navn}</strong> &nbsp; <span class="snitt-badge">⭐ {snittscore:.2f} snitt</span>'
+                f' &nbsp; <span style="color:#777;font-size:13px;">({antall} registrerte vurderinger)</span></div>',
+                unsafe_allow_html=True,
+            )
+            with st.expander(f"Se alle vurderinger og kommentarer for {navn}"):
+                info = butikkliste.get(navn, {})
+                if info.get("url"):
+                    st.markdown(f"🌐 [Besøk nettbutikk]({info['url']})")
+                for fagfelt, kriterium, score, kommentar, jurymedlem in sorted(detaljer[navn]):
+                    st.markdown(f"**{kriterium}** _({fagfelt} · {jurymedlem})_ — {'⭐' * int(score)}")
+                    if kommentar:
+                        st.caption(kommentar)
+
+
+if side == "📖 Oversikt":
+    vis_oversikt()
+elif side == "✍️ Vurdering":
+    vis_vurdering(sh, butikkliste)
+elif side == "🏆 Finale":
+    vis_finale(sh, butikkliste)
