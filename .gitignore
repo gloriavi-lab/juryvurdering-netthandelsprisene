@@ -1,7 +1,7 @@
-.streamlit/secrets.toml
-butikkliste.json
-.DS_Store
-venv/
-__pycache__/
-*.pyc
 *.png
+*.pyc
+.DS_Store
+.streamlit/secrets.toml
+__pycache__/
+butikkliste.json
+venv/
