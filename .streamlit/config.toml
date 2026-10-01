@@ -1,5 +1,8 @@
 [theme]
 primaryColor = "#C8102E"
-backgroundColor = "#FFFFFF"
-secondaryBackgroundColor = "#F8F7F5"
-textColor = "#212121"
+font = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+baseRadius = "0.75rem"
+# backgroundColor/textColor er bevisst IKKE satt – da bruker Streamlit sine
+# innebygde lys/mørk-fargesett (styrt av brukerens system/app-innstilling),
+# slik at appen fungerer fint i begge. Egendefinerte kort/klasser i styles.py
+# følger samme valg via en prefers-color-scheme-regel.
