@@ -38,8 +38,13 @@ CSS = f"""
 
 /* Nok bunnmarg til at Streamlits flytende "Manage app"/profil-knapper nederst
    til høyre aldri dekker innhold. */
-.block-container {{ padding-bottom: 72px; overflow-wrap: break-word; }}
+.block-container {{ padding-bottom: 72px; }}
 * {{ hyphens: none !important; -webkit-hyphens: none !important; }}
+/* VIKTIG: ingen global overflow-wrap:break-word – den tvinger brudd MIDT I
+   ord når en lang sammensatt tekst ("Markedsføring/kundedialog") ikke får
+   plass. Linjeskift skal kun skje ved mellomrom eller <wbr> (satt inn etter
+   hver "/" i komponentene selv), derfor normal/normal som default. */
+body {{ overflow-wrap: normal; word-break: normal; }}
 
 .stApp {{ background-color: var(--lys-bakgrunn); }}
 div[data-testid="stExpander"] {{ background-color: var(--kort-bakgrunn); border-radius: 12px; border: 1px solid var(--kant); }}
@@ -68,21 +73,26 @@ div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px;
 
 .klasse-badge {{ display:inline-block; font-size:12px; font-weight:700; padding:3px 10px; border-radius:20px; background:var(--lys-bakgrunn); border:1px solid var(--kant); color:var(--tekst); }}
 
-/* Rutenett med garantert lik kort-høyde per rad – bygget som ÉN html-blokk
-   (ikke st.columns), slik at CSS grid kan styre både responsivitet og høyde. */
-.rutenett {{ display:grid; gap:16px; grid-template-columns: repeat(5, 1fr); align-items: stretch; }}
-.rutenett.tre-per-rad {{ grid-template-columns: repeat(3, 1fr); }}
-@media (max-width: 1100px) {{ .rutenett {{ grid-template-columns: repeat(3, 1fr); }} }}
-@media (max-width: 640px) {{ .rutenett, .rutenett.tre-per-rad {{ grid-template-columns: 1fr; }} }}
-.rutenett-kort {{ background:var(--kort-bakgrunn); border:1px solid var(--kant); border-radius:14px; padding:16px 18px; display:flex; flex-direction:column; }}
-.rutenett-kort.aktiv {{ border:1.5px solid var(--rod); box-shadow: 0 0 0 3px rgba(200,16,46,0.08); }}
-.rutenett-kort h4 {{ margin:0 0 10px 0; font-size:14.5px; line-height:1.3; color:var(--tekst); }}
+/* Rutenett med garantert lik kort-BREDDE OG -høyde per rad – bygget som ÉN
+   html-blokk (ikke st.columns). minmax(0,1fr), ikke bare 1fr, er det som
+   faktisk tvinger lik bredde uansett innhold – uten minmax(0,...) kan et
+   kort med lang, usammenhengende tekst presse kolonnen sin bredere enn de
+   andre (det var årsaken til at "Kjøp/inspirasjon/personalisering" ble
+   bredere enn resten). */
+.rutenett {{ display:grid; gap:16px; grid-template-columns: repeat(5, minmax(0, 1fr)); align-items: stretch; }}
+.rutenett.tre-per-rad {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }}
+@media (max-width: 1100px) {{ .rutenett {{ grid-template-columns: repeat(3, minmax(0, 1fr)); }} }}
+@media (max-width: 640px) {{ .rutenett, .rutenett.tre-per-rad {{ grid-template-columns: minmax(0, 1fr); }} }}
+.rutenett-kort {{ background:var(--kort-bakgrunn); border:1px solid var(--kant); border-radius:14px; padding:20px 22px; display:flex; flex-direction:column; border-top:4px solid var(--kant); min-width:0; }}
+.rutenett-kort.aktiv {{ border:1.5px solid var(--rod); border-top:4px solid var(--rod); box-shadow: 0 0 0 3px rgba(200,16,46,0.08); }}
+.rutenett-kort h4 {{ margin:0 0 12px 0; font-size:14.5px; line-height:1.3; color:var(--tekst); min-height:2.6em; display:flex; align-items:flex-start; }}
 .rutenett-kort .merke-tekst {{ color:var(--rod); font-weight:700; }}
 .rutenett-kort ul {{ margin:0; padding-left:18px; flex:1; }}
 .rutenett-kort li {{ margin-bottom:7px; color:var(--tekst); font-size:13.5px; line-height:1.4; }}
 .rutenett-kort .belop {{ color:var(--tekst-dempet); font-size:13px; margin-top:2px; }}
 .rutenett-kort .antall {{ color:var(--tekst-dempet); font-size:12.5px; margin-top:auto; padding-top:8px; }}
 .rutenett-kort .stor-tall {{ font-size:26px; font-weight:800; color:var(--tekst); }}
+.rutenett-kort .fagfelt-ikon {{ display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:7px; flex-shrink:0; margin-top:6px; }}
 
 .finale-rad {{ background:var(--kort-bakgrunn); border:1px solid var(--kant); border-left:4px solid var(--rod); border-radius:10px; padding:12px 16px; margin-bottom:8px; }}
 .scorelinje-bakgrunn {{ background:var(--lys-bakgrunn); border-radius:6px; height:7px; width:100%; overflow:hidden; margin-top:6px; }}

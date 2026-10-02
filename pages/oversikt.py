@@ -6,6 +6,14 @@ import streamlit as st
 from components import rutenett, topptekst
 from data import FAGFELT, KLASSE_DEFINISJON, KRITERIER_PER_FAGFELT, SKALA_FORKLARING
 from sheets import read_stores
+from theme import FAGFELT_FARGE
+
+
+def _bryt_etter_skratrek(tekst: str) -> str:
+    """Setter inn <wbr> (valgfritt linjeskift) etter hver «/», slik at lange
+    sammensatte ord ("Markedsføring/kundedialog") kan brytes PENT ved
+    skråstreken i stedet for midt i et ord når de ikke får plass."""
+    return tekst.replace("/", "/<wbr>")
 
 topptekst("Oversikt")
 
@@ -40,16 +48,21 @@ mitt_fagfelt = st.session_state.get("_fagfelt")
 if mitt_fagfelt:
     st.caption(f"Ditt fagfelt (**{mitt_fagfelt}**) er uthevet med rød kant under – de andre vises likt, slik at alle kan se hele vurderingsgrunnlaget.")
 
-# rutenett() legger selv til "rutenett-kort"-klassen uten "aktiv"; for å
-# fremheve eget fagfelt bygges disse kortene manuelt i samme mønster.
+# rutenett() legger selv til "rutenett-kort"-klassen uten "aktiv" eller
+# fagfelt-farge; disse kortene trenger begge deler, så de bygges manuelt her.
 MERKE = ' <span class="merke-tekst">· ditt fagfelt</span>'
 deler = []
 for kat in FAGFELT:
     er_mitt = kat == mitt_fagfelt
-    punkter = "".join(f"<li>{k}</li>" for k in KRITERIER_PER_FAGFELT[kat])
+    punkter = "".join(f"<li>{_bryt_etter_skratrek(k)}</li>" for k in KRITERIER_PER_FAGFELT[kat])
     klasse = " aktiv" if er_mitt else ""
     merke = MERKE if er_mitt else ""
-    deler.append(f'<div class="rutenett-kort{klasse}"><h4>{kat}{merke}</h4><ul>{punkter}</ul></div>')
+    # Rødt (aktiv) går foran fagfelt-fargen når det er ditt eget fagfelt –
+    # fagfelt-fargen vises likevel som en liten prikk ved tittelen, slik at
+    # koblingen til regnearkets fargekoding alltid er synlig.
+    toppstripe = "" if er_mitt else f'style="border-top-color:{FAGFELT_FARGE[kat]};"'
+    prikk = f'<span class="fagfelt-ikon" style="background:{FAGFELT_FARGE[kat]};"></span>'
+    deler.append(f'<div class="rutenett-kort{klasse}" {toppstripe}><h4>{prikk}{_bryt_etter_skratrek(kat)}{merke}</h4><ul>{punkter}</ul></div>')
 st.markdown(f'<div class="rutenett">{"".join(deler)}</div>', unsafe_allow_html=True)
 
 st.divider()
