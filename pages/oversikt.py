@@ -1,57 +1,63 @@
-"""Side 1 – Oversikt: kriterier, klassedefinisjoner og veien til finalen."""
+"""Side 1 – Oversikt: kriterier, klassedefinisjoner og veien til finalen.
+Ingen stegindikator her (den hører til Vurdering, jf. brief)."""
 
 import streamlit as st
 
-from components import onboarding_steg, topptekst
-from data import FAGFELT, KLASSE_DEFINISJON, KRITERIER_PER_FAGFELT
+from components import rutenett, topptekst
+from data import FAGFELT, KLASSE_DEFINISJON, KRITERIER_PER_FAGFELT, SKALA_FORKLARING
+from sheets import read_stores
 
 topptekst("Oversikt")
 
-butikkliste = st.session_state.get("butikkliste")
-steg = 1 if not butikkliste else (3 if st.session_state.get("_besokt_finale") else 2)
-onboarding_steg(steg)
+sh = st.session_state.get("_sh")
+butikker = {}
+if sh:
+    butikker, _ = read_stores(sh)
 
 st.caption(
-    "Hvert kriterium vurderes fra 1 til 5 stjerner (1 = svak, 5 = utmerket), med mulighet "
-    "for å legge inn en kommentar. Samme kriterier som ble brukt i Fase 1.",
-    help="Dette er samme poengskala og samme kriterietekst som i Fase 1 – kun fagfeltet avgrenser hvilke du vurderer i Fase 2.",
+    "Hvert kriterium vurderes fra 1 til 5 stjerner, eller merkes «Kan ikke vurdere» hvis det ikke lar seg bedømme – "
+    "med mulighet for å legge inn en kommentar. Samme kriterier som ble brukt i Fase 1.",
+    help=SKALA_FORKLARING,
 )
 
-st.subheader("Størrelsesklasser")
-kolonner = st.columns(3)
-for kol, (klasse, belop) in zip(kolonner, KLASSE_DEFINISJON):
-    with kol:
-        st.metric(klasse, belop)
+st.subheader("Størrelsesklasser", anchor=False)
+antall_per_klasse = {klasse: 0 for klasse, _ in KLASSE_DEFINISJON}
+for info in butikker.values():
+    if info.get("klasse") in antall_per_klasse:
+        antall_per_klasse[info["klasse"]] += 1
+
+klasse_kort = [
+    f'<h4>{klasse}</h4><div class="belop">{belop}</div>'
+    f'<div class="antall">{antall_per_klasse[klasse]} butikker</div>'
+    for klasse, belop in KLASSE_DEFINISJON
+]
+rutenett(klasse_kort, tre_per_rad=True)
 
 st.divider()
-st.subheader("Kriterier per fagfelt")
+st.subheader("Kriterier per fagfelt", anchor=False)
 
 mitt_fagfelt = st.session_state.get("_fagfelt")
 if mitt_fagfelt:
-    st.caption(f"Ditt fagfelt (**{mitt_fagfelt}**) er uthevet under.")
+    st.caption(f"Ditt fagfelt (**{mitt_fagfelt}**) er uthevet med rød kant under – de andre vises likt, slik at alle kan se hele vurderingsgrunnlaget.")
 
-rekker = [FAGFELT[:3], FAGFELT[3:]]
-for rekke in rekker:
-    kolonner = st.columns(len(rekke))
-    for kol, kategori in zip(kolonner, rekke):
-        with kol:
-            er_mitt = kategori == mitt_fagfelt
-            css_klasse = "kat-kort aktiv" if er_mitt else "kat-kort"
-            tittel = f'{kategori} <span class="merke-tekst">· ditt fagfelt</span>' if er_mitt else kategori
-            punkter = "".join(f"<li>{krit}</li>" for krit in KRITERIER_PER_FAGFELT[kategori])
-            st.markdown(f'<div class="{css_klasse}"><h4>{tittel}</h4><ul>{punkter}</ul></div>', unsafe_allow_html=True)
-    st.write("")
+# rutenett() legger selv til "rutenett-kort"-klassen uten "aktiv"; for å
+# fremheve eget fagfelt bygges disse kortene manuelt i samme mønster.
+MERKE = ' <span class="merke-tekst">· ditt fagfelt</span>'
+deler = []
+for kat in FAGFELT:
+    er_mitt = kat == mitt_fagfelt
+    punkter = "".join(f"<li>{k}</li>" for k in KRITERIER_PER_FAGFELT[kat])
+    klasse = " aktiv" if er_mitt else ""
+    merke = MERKE if er_mitt else ""
+    deler.append(f'<div class="rutenett-kort{klasse}"><h4>{kat}{merke}</h4><ul>{punkter}</ul></div>')
+st.markdown(f'<div class="rutenett">{"".join(deler)}</div>', unsafe_allow_html=True)
 
 st.divider()
-st.subheader("Veien til finalen")
+st.subheader("Veien til finalen", anchor=False)
 
-steg_tekster = [
-    ("1. Fase 1", "Alle nominerte butikker vurderes av juryen. Topp ca. 50 (etter snittscore) går videre."),
-    ("2. Fase 2 – Ekspertvurdering", "Hvert jurymedlem vurderer butikkene på sitt eget fagfelt. _(Du er her)_"),
-    ("3. Finale", "Butikker som har vært gjennom både Fase 1 og Fase 2 rangeres, og de beste per størrelsesklasse blir finalister."),
+veien_kort = [
+    '<h4>1. Fase 1</h4><ul><li>Alle nominerte butikker vurderes av juryen.</li><li>Topp ca. 50 (etter snittscore) går videre.</li></ul>',
+    '<h4>2. Fase 2 – Ekspertvurdering <span class="merke-tekst">· du er her</span></h4><ul><li>Hvert jurymedlem vurderer butikkene på sitt eget fagfelt.</li></ul>',
+    '<h4>3. Finale</h4><ul><li>Butikker gjennom både Fase 1 og Fase 2 rangeres.</li><li>De beste per størrelsesklasse blir finalister.</li></ul>',
 ]
-kol = st.columns(3)
-for c, (tittel, tekst) in zip(kol, steg_tekster):
-    with c.container(border=True):
-        st.markdown(f"**{tittel}**")
-        st.caption(tekst)
+rutenett(veien_kort, tre_per_rad=True)
