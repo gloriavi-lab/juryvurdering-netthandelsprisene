@@ -1,5 +1,8 @@
 [theme]
-primaryColor = "#C8102E"
+# FORELØPIG verdi – jeg har IKKE tilgang til Posten Brings interne
+# profilmanual, så dette er Bring sin kjente offentlige merkegrønn som
+# utgangspunkt. Bekreft/korriger mot de offisielle hex-verdiene.
+primaryColor = "#00703C"
 font = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 baseRadius = "0.75rem"
 # backgroundColor/textColor er bevisst IKKE satt – da bruker Streamlit sine

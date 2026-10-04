@@ -10,13 +10,26 @@ jurymedlem vises i stedet øverst til høyre i topptekst-komponenten på hver
 side (components.topptekst).
 """
 
+import os
+
 import streamlit as st
 
 from sheets import koble_sheets
 from styles import injiser_css
 
-st.set_page_config(page_title="Ekspertvurdering – Netthandelsprisene", page_icon="🎓", layout="wide", initial_sidebar_state="collapsed")
+LOGO_STI = "assets/bring-logo.svg"
+
+st.set_page_config(
+    page_title="Ekspertvurdering – Netthandelsprisene",
+    page_icon=LOGO_STI if os.path.exists(LOGO_STI) else "🎓",
+    layout="wide", initial_sidebar_state="collapsed",
+)
 injiser_css()
+
+if os.path.exists(LOGO_STI):
+    st.logo(LOGO_STI)
+# NB: assets/bring-logo.svg er ikke lagt inn ennå – appen fungerer fint uten,
+# men logoen vises først når fila er på plass (se svar til bruker).
 
 st.session_state["_sh"] = koble_sheets()
 

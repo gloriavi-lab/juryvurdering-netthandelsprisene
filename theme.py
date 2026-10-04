@@ -6,6 +6,11 @@ Fagfelt-fargene er hentet direkte fra cellefargene i "Rangering fase 1"
 (rad 1/2, kolonne F, I, M, P, S) i Netthandelsprisene_Fase 1.xlsx.
 """
 
+# FORELØPIG verdi – vi har ikke tilgang til Posten Brings interne
+# profilmanual, så dette er Bring sin kjente offentlige merkegrønn som
+# utgangspunkt. Bekreft/korriger mot de offisielle hex-verdiene.
+BRING_GRONN = "#00703C"
+
 FAGFELT_FARGE = {
     "Førsteinntrykk": "#4472C4",
     "Kundeservice & Tilgjengelighet": "#5B9BD5",

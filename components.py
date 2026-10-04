@@ -1,8 +1,13 @@
 """Gjenbrukbare UI-byggeklosser, slik at hver side slipper å style ting selv."""
 
-import streamlit as st
+import re
 
-from data import FAGFELT
+import pandas as pd
+import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
+
+from data import FAGFELT, KRITERIER_PER_FAGFELT, er_tall
+from theme import FAGFELT_FARGE
 
 
 def topptekst(sidetittel: str):
@@ -18,7 +23,7 @@ def topptekst(sidetittel: str):
 
     st.markdown(
         f'<div class="topptekst">'
-        f'<div><div class="merke">Netthandelsprisene · Fase 2 – Ekspertvurdering</div>'
+        f'<div><div class="merke-label">Netthandelsprisene · Fase 2 – Ekspertvurdering</div>'
         f'<div class="sidetittel">{sidetittel}</div></div>'
         f'<div class="hoyre">{jury_html}'
         f'<span class="status-prikk"><span class="prikk {prikk_klasse}"></span>{prikk_tekst}</span></div>'
@@ -90,14 +95,12 @@ def tom_tilstand(ikon: str, tittel: str, tekst: str):
 
 
 def jury_velger(jury: dict):
-    """Nedtrekksliste med jurymedlemmer fra Jury-fanen (navn + fagfelt), med
-    mulighet for å legge til et nytt medlem. Returnerer (jurynavn, fagfelt),
-    eller (None, None) mens "legg til nytt"-skjemaet er åpent."""
-    from sheets import legg_til_jurymedlem
-
+    """Nedtrekksliste med jurymedlemmer (fast liste i data.py – ingen egen
+    Jury-fane i regnearket, se brief). Fritekst-fallback for noen som ikke
+    står på listen fra før. Returnerer (jurynavn, fagfelt)."""
     navn_liste = sorted(jury.keys())
-    NYTT = "+ Legg til nytt jurymedlem …"
-    valg = navn_liste + [NYTT]
+    ANNEN = "Annen person …"
+    valg = navn_liste + [ANNEN]
     standard = st.session_state.get("_jurynavn")
     startindeks = valg.index(standard) if standard in navn_liste else 0
 
@@ -105,43 +108,101 @@ def jury_velger(jury: dict):
     with col1:
         valgt = st.selectbox("Ditt navn (jurymedlem)", valg, index=startindeks)
 
-    if valgt == NYTT:
-        with col2:
-            st.write("")  # juster vertikal linje med selectboxen
-            st.caption("Fyll inn under for å legge til et nytt jurymedlem.")
-        with st.form("nytt_jurymedlem_form"):
-            fc1, fc2, fc3 = st.columns([2, 2, 1])
-            nytt_navn = fc1.text_input("Navn")
-            nytt_fagfelt = fc2.selectbox("Fagfelt", FAGFELT)
-            lagt_til = fc3.form_submit_button("Legg til", icon=":material/person_add:")
-        if lagt_til and nytt_navn.strip():
-            sh = st.session_state.get("_sh")
-            legg_til_jurymedlem(sh, nytt_navn.strip(), nytt_fagfelt)
-            st.session_state["_jurynavn"] = nytt_navn.strip()
-            st.session_state["_fagfelt"] = nytt_fagfelt
-            st.rerun()
-        return None, None
+    if valgt == ANNEN:
+        with col1:
+            valgt = st.text_input("Skriv inn navnet ditt")
+        fagfelt_forslag = st.session_state.get("_fagfelt") or FAGFELT[0]
+    else:
+        fagfelt_forslag = st.session_state.get("_fagfelt") if st.session_state.get("_jurynavn") == valgt else None
+        fagfelt_forslag = fagfelt_forslag or jury.get(valgt) or FAGFELT[0]
 
-    standard_fagfelt = st.session_state.get("_fagfelt") if st.session_state.get("_jurynavn") == valgt else None
-    fagfelt_forslag = standard_fagfelt or jury.get(valgt) or FAGFELT[0]
     with col2:
         fagfelt_valgt = st.selectbox(
             "Ditt fagfelt", FAGFELT,
             index=FAGFELT.index(fagfelt_forslag) if fagfelt_forslag in FAGFELT else 0,
-            help="Hentet fra Jury-fanen i regnearket – kan overstyres her for denne økten.",
         )
+    if not valgt:
+        return None, None
     st.session_state["_jurynavn"] = valgt
     st.session_state["_fagfelt"] = fagfelt_valgt
     return valgt, fagfelt_valgt
 
 
-@st.dialog("Fjerne butikkliste?")
-def bekreft_fjern_liste():
-    st.write("Dette fjerner alle butikker fra 'Butikker'-fanen i regnearket. Vurderinger i 'Rådata' slettes **ikke**, men mister koblingen til en synlig butikk til du setter opp lista på nytt.")
-    c1, c2 = st.columns(2)
-    if c1.button("Avbryt", use_container_width=True):
-        st.rerun()
-    if c2.button("Ja, fjern", type="primary", use_container_width=True, icon=":material/delete:"):
-        from sheets import _skriv_butikker
-        _skriv_butikker(st.session_state["_sh"], {})
-        st.rerun()
+def _slug(tekst: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", tekst.lower()).strip("_")
+
+
+def regneark_tabell(butikker: dict, ratings: dict, navn_liste=None, hoyde: int = 600, fagfelt_liste=None):
+    """Tabell som speiler regnearkets oppsett: grupperte, fargede overskrifter
+    per fagfelt (nøyaktig samme farger som Netthandelsprisene_Fase 1.xlsx,
+    se theme.py), kriteriene under, URL som lenken «Besøk →», og Butikk/Klasse
+    festet ved horisontal scrolling. st.dataframe støtter ikke grupperte,
+    fargede overskrifter – derfor streamlit-aggrid (ag-Grid) her, som gjør det
+    ferdig (kolonnegrupper, egen styling per gruppe, faste kolonner, filter
+    og sortering) i stedet for en hjemmesnekret HTML-tabell med manuell
+    JS for de samme tingene."""
+    fagfelt_liste = fagfelt_liste or FAGFELT
+    navn_liste = navn_liste if navn_liste is not None else sorted(butikker.keys())
+
+    rader = []
+    for navn in navn_liste:
+        info = butikker.get(navn, {})
+        rad = {"Butikk": navn, "Klasse": info.get("klasse", "–"), "Bransje": info.get("bransje", "–"), "URL": info.get("url", "")}
+        scorer = ratings.get(navn, {}).get("scorer", {})
+        alle_tall = []
+        for fagfelt in fagfelt_liste:
+            for krit in KRITERIER_PER_FAGFELT[fagfelt]:
+                felt = f"{_slug(fagfelt)}__{_slug(krit)}"
+                verdi = scorer.get(krit, "")
+                rad[felt] = verdi
+                if er_tall(verdi):
+                    alle_tall.append(float(verdi))
+        rad["Snitt"] = round(sum(alle_tall) / len(alle_tall), 2) if alle_tall else None
+        rader.append(rad)
+    df = pd.DataFrame(rader)
+
+    lenke_renderer = JsCode(
+        "function(params) { if (!params.value) { return ''; } "
+        "return '<a href=\"' + params.value + '\" target=\"_blank\">Besøk ↗</a>'; }"
+    )
+    kolonne_defs = [
+        {"field": "Butikk", "headerName": "Butikk", "pinned": "left", "width": 170},
+        {"field": "Klasse", "headerName": "Klasse", "pinned": "left", "width": 90},
+        {"field": "Bransje", "headerName": "Bransje", "width": 160},
+        {"field": "URL", "headerName": "Lenke", "width": 100, "cellRenderer": lenke_renderer},
+    ]
+
+    custom_css = {}
+    for fagfelt in fagfelt_liste:
+        farge = FAGFELT_FARGE[fagfelt]
+        klasse_css = f"fagfelt-{_slug(fagfelt)}"
+        barn = []
+        for krit in KRITERIER_PER_FAGFELT[fagfelt]:
+            felt = f"{_slug(fagfelt)}__{_slug(krit)}"
+            if felt not in df.columns:
+                continue
+            barn.append({
+                "field": felt, "headerName": krit, "width": 120,
+                "cellStyle": JsCode(f"function(p) {{ return p.value ? {{backgroundColor: '{farge}22'}} : {{}}; }}"),
+            })
+        if barn:
+            kolonne_defs.append({"headerName": fagfelt, "headerClass": klasse_css, "children": barn})
+            custom_css[f".ag-header-group-cell.{klasse_css}"] = {
+                "background-color": f"{farge} !important", "color": "white !important", "font-weight": "700",
+            }
+            custom_css[f".ag-header-group-cell.{klasse_css} .ag-header-group-text"] = {"color": "white !important"}
+
+    kolonne_defs.append({"field": "Snitt", "headerName": "Snitt totalt", "pinned": "right", "width": 100})
+
+    grid_options = {
+        "columnDefs": kolonne_defs,
+        "defaultColDef": {"resizable": True, "sortable": True, "filter": True},
+        "headerHeight": 36,
+        "groupHeaderHeight": 36,
+    }
+    AgGrid(
+        df, gridOptions=grid_options, height=hoyde, allow_unsafe_jscode=True,
+        fit_columns_on_grid_load=False, custom_css=custom_css, theme="streamlit",
+    )
+
+

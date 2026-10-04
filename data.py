@@ -60,7 +60,7 @@ JURY_FAGFELT_FORSLAG = {
     "Guro": "Innovasjon",
 }
 
-IKKE_VURDERT = "N/A"
+IKKE_VURDERT = "Kan ikke vurdere"  # eksakt verdien som legges inn i regnearkets dropdown (se sheets.py)
 
 
 # ─────────────────────────────────────────────
@@ -150,10 +150,10 @@ def er_tall(score) -> bool:
         return False
 
 
-def status_for_butikk(butikk_id, kriterier, vurderinger_oppslag):
-    """vurderinger_oppslag: {(butikk_id, kriterium): {"score":.., "kommentar":..}}.
-    Returnerer "Ferdig", "Påbegynt" eller "Ikke startet"."""
-    antall_besvart = sum(1 for k in kriterier if (butikk_id, k) in vurderinger_oppslag)
+def status_for_scorer(scorer: dict, kriterier: list) -> str:
+    """scorer: {kriterium: score} for ÉN butikk. Returnerer "Ferdig",
+    "Påbegynt" eller "Ikke startet"."""
+    antall_besvart = sum(1 for k in kriterier if k in scorer and scorer[k])
     if antall_besvart == 0:
         return "Ikke startet"
     if antall_besvart == len(kriterier):
@@ -161,12 +161,8 @@ def status_for_butikk(butikk_id, kriterier, vurderinger_oppslag):
     return "Påbegynt"
 
 
-def snitt_for_butikk(butikk_id, kriterier, vurderinger_oppslag):
-    """Snitt av tallscorer for kriteriene (N/A/«Kan ikke vurdere» telles ikke med).
-    Returnerer None hvis ingen tallscorer er gitt ennå."""
-    tall = [
-        float(vurderinger_oppslag[(butikk_id, k)]["score"])
-        for k in kriterier
-        if (butikk_id, k) in vurderinger_oppslag and er_tall(vurderinger_oppslag[(butikk_id, k)]["score"])
-    ]
+def snitt_av_scorer(scorer: dict, kriterier: list):
+    """Snitt av tallscorer blant kriteriene (N/A/«Kan ikke vurdere» telles
+    ikke med). Returnerer None hvis ingen tallscorer er gitt ennå."""
+    tall = [float(scorer[k]) for k in kriterier if k in scorer and er_tall(scorer[k])]
     return (sum(tall) / len(tall)) if tall else None
