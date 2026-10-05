@@ -6,7 +6,7 @@ import pandas as pd
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
-from data import FAGFELT, KRITERIER_PER_FAGFELT, er_tall
+from data import er_tall
 from theme import FAGFELT_FARGE
 
 
@@ -94,45 +94,13 @@ def tom_tilstand(ikon: str, tittel: str, tekst: str):
     )
 
 
-def jury_velger(jury: dict):
-    """Nedtrekksliste med jurymedlemmer (fast liste i data.py – ingen egen
-    Jury-fane i regnearket, se brief). Fritekst-fallback for noen som ikke
-    står på listen fra før. Returnerer (jurynavn, fagfelt)."""
-    navn_liste = sorted(jury.keys())
-    ANNEN = "Annen person …"
-    valg = navn_liste + [ANNEN]
-    standard = st.session_state.get("_jurynavn")
-    startindeks = valg.index(standard) if standard in navn_liste else 0
-
-    col1, col2 = st.columns(2)
-    with col1:
-        valgt = st.selectbox("Ditt navn (jurymedlem)", valg, index=startindeks)
-
-    if valgt == ANNEN:
-        with col1:
-            valgt = st.text_input("Skriv inn navnet ditt")
-        fagfelt_forslag = st.session_state.get("_fagfelt") or FAGFELT[0]
-    else:
-        fagfelt_forslag = st.session_state.get("_fagfelt") if st.session_state.get("_jurynavn") == valgt else None
-        fagfelt_forslag = fagfelt_forslag or jury.get(valgt) or FAGFELT[0]
-
-    with col2:
-        fagfelt_valgt = st.selectbox(
-            "Ditt fagfelt", FAGFELT,
-            index=FAGFELT.index(fagfelt_forslag) if fagfelt_forslag in FAGFELT else 0,
-        )
-    if not valgt:
-        return None, None
-    st.session_state["_jurynavn"] = valgt
-    st.session_state["_fagfelt"] = fagfelt_valgt
-    return valgt, fagfelt_valgt
 
 
 def _slug(tekst: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", tekst.lower()).strip("_")
 
 
-def regneark_tabell(butikker: dict, ratings: dict, navn_liste=None, hoyde: int = 600, fagfelt_liste=None):
+def regneark_tabell(butikker: dict, ratings: dict, kriterier_per_fagfelt: dict, navn_liste=None, hoyde: int = 600, fagfelt_liste=None):
     """Tabell som speiler regnearkets oppsett: grupperte, fargede overskrifter
     per fagfelt (nøyaktig samme farger som Netthandelsprisene_Fase 1.xlsx,
     se theme.py), kriteriene under, URL som lenken «Besøk →», og Butikk/Klasse
@@ -140,8 +108,9 @@ def regneark_tabell(butikker: dict, ratings: dict, navn_liste=None, hoyde: int =
     fargede overskrifter – derfor streamlit-aggrid (ag-Grid) her, som gjør det
     ferdig (kolonnegrupper, egen styling per gruppe, faste kolonner, filter
     og sortering) i stedet for en hjemmesnekret HTML-tabell med manuell
-    JS for de samme tingene."""
-    fagfelt_liste = fagfelt_liste or FAGFELT
+    JS for de samme tingene. kriterier_per_fagfelt kommer fra jury.py (lest
+    fra Kriterier-fanen) – IKKE hardkodet lenger."""
+    fagfelt_liste = fagfelt_liste or list(kriterier_per_fagfelt.keys())
     navn_liste = navn_liste if navn_liste is not None else sorted(butikker.keys())
 
     rader = []
@@ -151,7 +120,7 @@ def regneark_tabell(butikker: dict, ratings: dict, navn_liste=None, hoyde: int =
         scorer = ratings.get(navn, {}).get("scorer", {})
         alle_tall = []
         for fagfelt in fagfelt_liste:
-            for krit in KRITERIER_PER_FAGFELT[fagfelt]:
+            for krit in kriterier_per_fagfelt.get(fagfelt, []):
                 felt = f"{_slug(fagfelt)}__{_slug(krit)}"
                 verdi = scorer.get(krit, "")
                 rad[felt] = verdi
@@ -174,10 +143,10 @@ def regneark_tabell(butikker: dict, ratings: dict, navn_liste=None, hoyde: int =
 
     custom_css = {}
     for fagfelt in fagfelt_liste:
-        farge = FAGFELT_FARGE[fagfelt]
+        farge = FAGFELT_FARGE.get(fagfelt, "#888888")
         klasse_css = f"fagfelt-{_slug(fagfelt)}"
         barn = []
-        for krit in KRITERIER_PER_FAGFELT[fagfelt]:
+        for krit in kriterier_per_fagfelt.get(fagfelt, []):
             felt = f"{_slug(fagfelt)}__{_slug(krit)}"
             if felt not in df.columns:
                 continue

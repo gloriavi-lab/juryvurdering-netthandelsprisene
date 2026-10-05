@@ -121,6 +121,14 @@ div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px;
 .lagringsstatus {{ font-size:12.5px; color:var(--tekst-dempet); display:flex; align-items:center; gap:6px; }}
 .lagringsstatus.feil {{ color:var(--feil); font-weight:600; }}
 .lagringsstatus.ok {{ color:var(--gronn); }}
+
+/* Jurymatrise på Oversikt: full tabell på desktop, kompakte kort på mobil. */
+.kun-mobil-vis {{ display:none; }}
+.kun-desktop-vis {{ display:block; }}
+@media (max-width: 640px) {{
+    .kun-mobil-vis {{ display:grid; }}
+    .kun-desktop-vis {{ display:none; }}
+}}
 </style>
 """
 

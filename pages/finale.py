@@ -8,7 +8,8 @@ import io
 import streamlit as st
 
 from components import klasse_badge, topptekst
-from data import FAGFELT, KLASSER, KRITERIER_PER_FAGFELT, er_tall, snitt_av_scorer, status_for_scorer
+from data import KLASSER, er_tall, snitt_av_scorer, status_for_scorer
+from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, read_criteria
 from sheets import er_finale_last, finale_las_info, hent_finale_snapshot, las_finale, read_ratings, read_stores
 
 topptekst("Finale")
@@ -17,6 +18,10 @@ sh = st.session_state.get("_sh")
 if not sh:
     st.warning("Google Sheets-tilkoblingen mangler – gå til **Innstillinger**.", icon=":material/cloud_off:")
     st.stop()
+
+kriterier_fase3 = aktive_kriterier(read_criteria(sh), fase="Fase 3")
+FAGFELT = fagfelt_liste(kriterier_fase3)
+KRITERIER_PER_FAGFELT = kriterier_per_fagfelt(kriterier_fase3)
 
 try:
     butikker, _ = read_stores(sh)

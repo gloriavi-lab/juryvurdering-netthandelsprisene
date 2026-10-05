@@ -27,8 +27,9 @@ from google.oauth2.service_account import Credentials
 
 from data import FAGFELT, IKKE_VURDERT, KRITERIER_PER_FAGFELT
 
-FASE1_FANE = "Rangering fase 1"
-FASE2_FANE = "Rangering fase 2"
+FASE1_FANE = "Rangering juryvurdering"  # tidligere "Rangering fase 1" – omdøpt etter avtale (ny fase-nummerering, se jury.py/Faser-fanen)
+FASE2_FANE = "Rangering ekspertvurdering"  # tidligere "Rangering fase 2"
+_GAMLE_NAVN = {FASE1_FANE: "Rangering fase 1", FASE2_FANE: "Rangering fase 2"}
 GRUNNKOLONNER = ["Butikk", "Jurymedlem", "Klasse", "Bransje", "URL"]
 SNITT_KOLONNE_NAVN = "Snitt totalt"
 KOMMENTAR_PREFIKS = "Kommentar – "
@@ -70,11 +71,19 @@ def koble_sheets():
 # Header-oppslag – ALDRI faste kolonnebokstaver
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=60, show_spinner=False)
-def _header_data(_ws):
+def _header_data(_ws, grunnkolonner=None):
     """Leser rad 1+2 (med combine_merged_cells slik at en sammenslått
     gruppeoverskrift gjentas i hver kolonne den dekker) og bygger kolonne-
     oppslag for grunnkolonner og (fagfelt, kriterium)-par. Forward-fyller i
-    tillegg manuelt som ekstra sikkerhet, i tilfelle en sammenslåing mangler."""
+    tillegg manuelt som ekstra sikkerhet, i tilfelle en sammenslåing mangler.
+
+    grunnkolonner er konfigurerbar (ikke bare Rangering-fanenes faste liste)
+    siden samme funksjon nå også brukes for Jury-fanen (Navn/E-post/Farge).
+    En kolonne regnes som en FAGFELT-gruppe (ikke en grunnkolonne) når den
+    IKKE står i grunnkolonner-lista og har et eget navn i rad 2 – ikke lenger
+    avhengig av en hardkodet liste med fagfeltnavn, siden Kriterier-fanen nå
+    er den egentlige kilden til hvilke fagfelt som finnes."""
+    grunnkolonner = grunnkolonner if grunnkolonner is not None else GRUNNKOLONNER + [SNITT_KOLONNE_NAVN]
     rader = _ws.get("A1:ZZ2", combine_merged_cells=True)
     rad1 = rader[0] if len(rader) > 0 else []
     rad2 = rader[1] if len(rader) > 1 else []
@@ -89,11 +98,13 @@ def _header_data(_ws):
     grunnkolonne_indeks = {}
     kriterium_indeks = {}  # (fagfelt, kriterium) -> 1-indeksert kolonne
     for i, (g1, g2) in enumerate(zip(rad1_fylt, rad2 + [""] * (len(rad1_fylt) - len(rad2))), start=1):
+        if not g1:
+            continue
         g2 = g2.strip() if g2 else ""
-        if g1 in GRUNNKOLONNER or g1 == SNITT_KOLONNE_NAVN:
+        if g1 in grunnkolonner:
             if not g2:  # grunnkolonner har IKKE eget navn i rad 2
                 grunnkolonne_indeks[g1] = i
-        elif g1 in FAGFELT and g2:
+        elif g2:
             kriterium_indeks[(g1, g2)] = i
 
     siste_kolonne = max([*grunnkolonne_indeks.values(), *kriterium_indeks.values()], default=5)
@@ -117,7 +128,121 @@ def _sikre_ekstra_kolonner(ws, grunnkolonne_indeks, siste_kolonne):
 
 
 def _fane(sh, navn):
-    return sh.worksheet(navn)
+    """Henter fanen på nytt navn. Finner den et gammelt navn (fra før
+    omdøpingen til den nye fase-inndelingen, avtalt med bruker), gir den
+    automatisk det nye navnet og fortsetter – trygt, ingen data berøres."""
+    try:
+        return sh.worksheet(navn)
+    except gspread.WorksheetNotFound:
+        gammelt = _GAMLE_NAVN.get(navn)
+        if gammelt:
+            try:
+                ws = sh.worksheet(gammelt)
+                ws.update_title(navn)
+                st.toast(f"Omdøpte «{gammelt}» til «{navn}».", icon=":material/drive_file_rename_outline:")
+                return ws
+            except gspread.WorksheetNotFound:
+                pass
+        raise
+
+
+def hent_eller_lag_fane(sh, navn, header):
+    """Enkel fane med ÉN overskriftsrad (ikke den grupperte Rangering-
+    stilen) – brukt for Kriterier/Veiledning/Faser."""
+    try:
+        return sh.worksheet(navn)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=navn, rows=200, cols=max(len(header), 4))
+        ws.append_row(header)
+        return ws
+
+
+def _bygg_gruppert_header(sh, fane_navn, grunnkolonner, kriterier_per_fagfelt_dict, checkbox=False):
+    """Bygger en NY fane med samme grupperte, fargede to-rads-header som
+    Rangering-fanene (rad 1 = fagfelt-gruppe, slått sammen og farget; rad 2 =
+    kriterienavn) – men fra bunnen, siden dette er helt nye faner uten noe
+    eksisterende Excel-oppsett å kopiere/bevare. Brukt av jury.py (Jury-
+    fanen). checkbox=True gir BOOLEAN-datavalidering i stedet for 1-5-liste."""
+    from theme import FAGFELT_FARGE, GRUNNKOLONNE_FARGE
+
+    ws = sh.add_worksheet(title=fane_navn, rows=200, cols=max(len(grunnkolonner) + 20, 10))
+    rad1, rad2 = list(grunnkolonner), [""] * len(grunnkolonner)
+    merge_forespørsler = []
+    kol = len(grunnkolonner) + 1
+    for fagfelt, kriterier in kriterier_per_fagfelt_dict.items():
+        start_kol = kol
+        for krit in kriterier:
+            rad1.append(fagfelt if krit == kriterier[0] else "")
+            rad2.append(krit)
+            kol += 1
+        if len(kriterier) > 1:
+            merge_forespørsler.append({
+                "mergeCells": {
+                    "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": start_kol - 1, "endColumnIndex": kol - 1},
+                    "mergeType": "MERGE_ALL",
+                }
+            })
+    ws.update([rad1, rad2])
+
+    formater = []
+    for i, _ in enumerate(grunnkolonner, start=1):
+        formater.append({"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 2, "startColumnIndex": i - 1, "endColumnIndex": i},
+            "cell": {"userEnteredFormat": {"backgroundColor": _hex_til_rgb(GRUNNKOLONNE_FARGE), "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}}},
+            "fields": "userEnteredFormat(backgroundColor,textFormat)",
+        }})
+    kol = len(grunnkolonner) + 1
+    for fagfelt, kriterier in kriterier_per_fagfelt_dict.items():
+        formater.append({"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 2, "startColumnIndex": kol - 1, "endColumnIndex": kol - 1 + len(kriterier)},
+            "cell": {"userEnteredFormat": {"backgroundColor": _hex_til_rgb(FAGFELT_FARGE.get(fagfelt, "#888888")), "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}}},
+            "fields": "userEnteredFormat(backgroundColor,textFormat)",
+        }})
+        if checkbox:
+            formater.append({"setDataValidation": {
+                "range": {"sheetId": ws.id, "startRowIndex": FORSTE_DATARAD - 1, "endRowIndex": 200, "startColumnIndex": kol - 1, "endColumnIndex": kol - 1 + len(kriterier)},
+                "rule": {"condition": {"type": "BOOLEAN"}, "strict": True},
+            }})
+        kol += len(kriterier)
+
+    ws.spreadsheet.batch_update({"requests": merge_forespørsler + formater})
+    ws.freeze(rows=2, cols=len(grunnkolonner))
+    _header_data.clear()
+    return ws
+
+
+def _hex_til_rgb(hex_farge: str) -> dict:
+    hex_farge = hex_farge.lstrip("#")
+    return {"red": int(hex_farge[0:2], 16) / 255, "green": int(hex_farge[2:4], 16) / 255, "blue": int(hex_farge[4:6], 16) / 255}
+
+
+def legg_til_kriterium_kolonne(sh, fane_navn, fagfelt, nytt_kriterium):
+    """Setter inn ÉN ny, tom kolonne for et nytt kriterium rett etter siste
+    eksisterende kolonne i riktig fagfeltgruppe i en Rangering-fane.
+    insertDimension(inheritFromBefore=True) kopierer formatering OG
+    datavalidering fra nabokolonnen automatisk – ingen andre celler berøres,
+    og alt annet skyves bare til høyre (ingen data går tapt).
+
+    Dette er det ENESTE stedet appen endrer struktur/formatering i en
+    Rangering-fane – skal KUN kalles etter eksplisitt bekreftelse fra
+    brukeren (st.dialog), se pages/innstillinger.py. IKKE testet mot et
+    ekte regneark ennå – vær forsiktig første gang, og sjekk resultatet i
+    Sheets rett etterpå."""
+    ws = _fane(sh, fane_navn)
+    grunn, krit, siste = _header_data(ws)
+    kolonner_i_gruppe = sorted(kol for (f, k), kol in krit.items() if f == fagfelt)
+    if not kolonner_i_gruppe:
+        raise ValueError(f"Fant ingen eksisterende kolonner for fagfeltet «{fagfelt}» i «{fane_navn}» å kopiere format fra.")
+    siste_i_gruppe = max(kolonner_i_gruppe)  # 1-indeksert
+
+    ws.spreadsheet.batch_update({"requests": [{
+        "insertDimension": {
+            "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": siste_i_gruppe, "endIndex": siste_i_gruppe + 1},
+            "inheritFromBefore": True,
+        }
+    }]})
+    ws.update(gspread.utils.rowcol_to_a1(2, siste_i_gruppe + 1), [[nytt_kriterium]])
+    _header_data.clear()
 
 
 def _sikre_fase2_fane(sh):
