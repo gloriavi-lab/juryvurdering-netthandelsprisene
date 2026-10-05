@@ -3,7 +3,6 @@ Butikklisten kommer direkte fra "Rangering fase 1"-fanen – ingen Excel-
 opplasting her lenger (se brief del 3: regnearket ER fasiten, appen bygger
 ingen egen struktur)."""
 
-import pandas as pd
 import streamlit as st
 
 from components import status_prikk, topptekst
@@ -15,6 +14,7 @@ from sheets import (
     FASE1_FANE, FASE2_FANE, er_finale_last, finale_las_info, fjern_finale_las,
     legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, read_fase1_scores, read_ratings, read_stores,
 )
+from theme import FAGFELT_FARGE
 
 topptekst("Innstillinger")
 
@@ -80,52 +80,53 @@ kriterier_fase3 = aktive_kriterier(alle_kriterier, fase="Fase 3")
 felt_dict = kriterier_per_fagfelt(kriterier_fase3)
 jury = read_jury(sh)
 
-st.markdown("**Fordeling** – kryss av hvilke kriterier hvert jurymedlem skal vurdere.")
+st.caption("Velg én person, kryss av kriteriene de skal vurdere, lagre. Enkelt og ett steg av gangen.")
 
 if not felt_dict:
     st.caption("Ingen aktive kriterier funnet for Fase 3 ennå.")
 else:
-    kolonner = [f"{fagfelt}: {k}" for fagfelt in felt_dict for k in felt_dict[fagfelt]]
     navn_liste_jury = sorted(jury.keys())
-    rader = []
-    for navn in navn_liste_jury:
-        mine = jury[navn]["kriterier"]
-        rad = {"Jurymedlem": navn}
-        for kol in kolonner:
-            k = kol.split(": ", 1)[1]
-            rad[kol] = k in mine
-        rader.append(rad)
+    NYTT = "+ Nytt jurymedlem …"
+    valgt_person = st.selectbox("Jurymedlem", navn_liste_jury + [NYTT], key="_jury_admin_valgt")
 
-    df = pd.DataFrame(rader) if rader else pd.DataFrame(columns=["Jurymedlem"] + kolonner)
-    column_config = {"Jurymedlem": st.column_config.TextColumn("Jurymedlem", disabled=True)}
-    for kol in kolonner:
-        column_config[kol] = st.column_config.CheckboxColumn(kol.split(": ", 1)[1][:24])
-    redigert = st.data_editor(df, column_config=column_config, hide_index=True, use_container_width=True, key="fordeling_editor")
+    if valgt_person == NYTT:
+        nytt_navn_jury = st.text_input("Navn på nytt jurymedlem")
+        if st.button("Opprett", type="primary", icon=":material/person_add:", disabled=not nytt_navn_jury.strip()):
+            write_jury(sh, nytt_navn_jury.strip(), set())
+            st.success(f"«{nytt_navn_jury}» opprettet – velg personen i lista over for å tildele kriterier.", icon=":material/check_circle:")
+            st.rerun()
+    elif valgt_person:
+        mine_na = jury[valgt_person]["kriterier"]
+        st.markdown(f"**Kriterier for {valgt_person}:**")
 
-    st.caption("«Velg hele fagfeltet» krysser av alle kriterier i ett fagfelt for én person med ett klikk (lagres med det samme).")
-    vc1, vc2, vc3 = st.columns([2, 2, 1])
-    valgt_navn_bulk = vc1.selectbox("Jurymedlem", navn_liste_jury, key="_bulk_navn") if navn_liste_jury else None
-    valgt_fagfelt_bulk = vc2.selectbox("Fagfelt", list(felt_dict.keys()), key="_bulk_fagfelt")
-    if vc3.button("Velg hele fagfeltet", use_container_width=True, disabled=not valgt_navn_bulk):
-        nye = set(jury.get(valgt_navn_bulk, {}).get("kriterier", set())) | set(felt_dict[valgt_fagfelt_bulk])
-        write_jury(sh, valgt_navn_bulk, nye, jury.get(valgt_navn_bulk, {}).get("epost", ""), jury.get(valgt_navn_bulk, {}).get("farge", ""))
-        st.toast(f"{valgt_fagfelt_bulk} valgt for {valgt_navn_bulk}.", icon=":material/check_circle:")
-        st.rerun()
+        def _sett_checkbox_verdier(kriterier, person, alle_nokkel):
+            verdi = st.session_state[alle_nokkel]
+            for k in kriterier:
+                st.session_state[f"chk_{person}_{k}"] = verdi
 
-    nc1, nc2, nc3 = st.columns([2, 2, 1])
-    nytt_navn_jury = nc1.text_input("Nytt jurymedlem – navn", key="_nytt_jurymedlem_navn")
-    ny_epost_jury = nc2.text_input("E-post (valgfri)", key="_nytt_jurymedlem_epost")
-    if nc3.button("Legg til jurymedlem", use_container_width=True, disabled=not nytt_navn_jury.strip()):
-        write_jury(sh, nytt_navn_jury.strip(), set(), ny_epost_jury.strip())
-        st.rerun()
+        nye_valgt = set()
+        for fagfelt, kriterier in felt_dict.items():
+            fc1, fc2 = st.columns([4, 1])
+            fc1.markdown(f"<span style='color:{FAGFELT_FARGE.get(fagfelt, '#888')};font-weight:700;'>{fagfelt}</span>", unsafe_allow_html=True)
+            alle_nokkel = f"alle_{valgt_person}_{fagfelt}"
+            fc2.checkbox(
+                "Alle", value=all(k in mine_na for k in kriterier), key=alle_nokkel,
+                on_change=_sett_checkbox_verdier, args=(kriterier, valgt_person, alle_nokkel),
+            )
+            for k in kriterier:
+                chk_nokkel = f"chk_{valgt_person}_{k}"
+                if chk_nokkel not in st.session_state:
+                    st.session_state[chk_nokkel] = k in mine_na
+                if st.checkbox(k, key=chk_nokkel):
+                    nye_valgt.add(k)
+        if st.button(f"💾 Lagre endringer for {valgt_person}", type="primary", icon=":material/save:"):
+            write_jury(sh, valgt_person, nye_valgt, jury[valgt_person].get("epost", ""), jury[valgt_person].get("farge", ""))
+            st.success(f"Lagret – {valgt_person} har nå {len(nye_valgt)} kriterier.", icon=":material/check_circle:")
+            st.rerun()
 
-    if st.button("💾 Lagre fordeling", type="primary", icon=":material/save:"):
-        for _, rad in redigert.iterrows():
-            navn = rad["Jurymedlem"]
-            valgt = {kol.split(": ", 1)[1] for kol in kolonner if rad.get(kol)}
-            write_jury(sh, navn, valgt, jury.get(navn, {}).get("epost", ""), jury.get(navn, {}).get("farge", ""))
-        st.success("Fordeling lagret.", icon=":material/check_circle:")
-        st.rerun()
+    with st.expander("Se oversikt over alle jurymedlemmer"):
+        oversikt_rader = [{"Jurymedlem": n, "Antall kriterier": len(jury[n]["kriterier"])} for n in navn_liste_jury]
+        st.dataframe(oversikt_rader, hide_index=True, use_container_width=True)
 
 st.write("")
 with st.expander("📋 Alle kriterier (aktive og inaktive)"):
