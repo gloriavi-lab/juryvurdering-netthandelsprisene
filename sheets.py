@@ -120,7 +120,7 @@ def _sikre_ekstra_kolonner(ws, grunnkolonne_indeks, siste_kolonne):
     ny_kolonne_1 = siste_kolonne + 1
     bokstav = gspread.utils.rowcol_to_a1(1, ny_kolonne_1).rstrip("1")
     bokstav_slutt = gspread.utils.rowcol_to_a1(1, ny_kolonne_1 + len(EKSTRA_KOLONNER) - 1).rstrip("1")
-    ws.update(f"{bokstav}1:{bokstav_slutt}1", [EKSTRA_KOLONNER])
+    ws.update([EKSTRA_KOLONNER], range_name=f"{bokstav}1:{bokstav_slutt}1")
     _header_data.clear()
     for i, navn in enumerate(EKSTRA_KOLONNER):
         grunnkolonne_indeks[navn] = ny_kolonne_1 + i
@@ -241,7 +241,7 @@ def legg_til_kriterium_kolonne(sh, fane_navn, fagfelt, nytt_kriterium):
             "inheritFromBefore": True,
         }
     }]})
-    ws.update(gspread.utils.rowcol_to_a1(2, siste_i_gruppe + 1), [[nytt_kriterium]])
+    ws.update([[nytt_kriterium]], range_name=gspread.utils.rowcol_to_a1(2, siste_i_gruppe + 1))
     _header_data.clear()
 
 
@@ -263,12 +263,13 @@ def _sikre_fase2_fane(sh):
             a1_start = gspread.utils.rowcol_to_a1(FORSTE_DATARAD, forste_krit_kol)
             a1_slutt = gspread.utils.rowcol_to_a1(antall_rader, siste_krit_kol)
             tomme_rader = [[""] * (siste_krit_kol - forste_krit_kol + 1) for _ in range(antall_rader - FORSTE_DATARAD + 1)]
-            ny.update(f"{a1_start}:{a1_slutt}", tomme_rader, value_input_option="USER_ENTERED")
+            ny.update(tomme_rader, range_name=f"{a1_start}:{a1_slutt}", value_input_option="USER_ENTERED")
         # "Jurymedlem"-kolonnen brukes ikke i Fase 2 (se moduldoc) – tømmes også.
         if "Jurymedlem" in grunn and antall_rader >= FORSTE_DATARAD:
             kol = grunn["Jurymedlem"]
             bokstav = gspread.utils.rowcol_to_a1(1, kol).rstrip("1")
-            ny.update(f"{bokstav}{FORSTE_DATARAD}:{bokstav}{antall_rader}", [[""] for _ in range(antall_rader - FORSTE_DATARAD + 1)])
+            tomme_jurymedlem_rader = [[""] for _ in range(antall_rader - FORSTE_DATARAD + 1)]
+            ny.update(tomme_jurymedlem_rader, range_name=f"{bokstav}{FORSTE_DATARAD}:{bokstav}{antall_rader}")
         return ny
 
 

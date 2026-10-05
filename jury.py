@@ -151,7 +151,7 @@ def deaktiver_kriterium(sh, kriterium_tekst):
     rader = ws.get_all_values()
     for i, rad in enumerate(rader[1:], start=2):
         if len(rad) >= 2 and rad[1] == kriterium_tekst:
-            ws.update(f"J{i}", [["Nei"]])
+            ws.update([["Nei"]], range_name=f"J{i}")
             read_criteria.clear()
             return True
     return False
@@ -220,7 +220,9 @@ def write_jury(sh, navn, kriterier_valgt: set, epost="", farge=""):
         rad_nr = jury[navn]["rad"]
     else:
         rad_nr = len(ws.get_all_values()) + 1
-        ws.update(f"A{rad_nr}", [[navn]])
+        # Raden trenger ikke et eget forhåndsskriv – arket har allerede 200
+        # rader allokert (se _bygg_gruppert_header), og batch_update under
+        # skriver hele raden i ett kall.
 
     oppdateringer = [
         {"range": f"A{rad_nr}", "values": [[navn]]},
