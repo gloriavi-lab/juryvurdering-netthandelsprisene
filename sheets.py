@@ -201,7 +201,7 @@ def _bygg_gruppert_header(sh, fane_navn, grunnkolonner, kriterier_per_fagfelt_di
         if checkbox:
             formater.append({"setDataValidation": {
                 "range": {"sheetId": ws.id, "startRowIndex": FORSTE_DATARAD - 1, "endRowIndex": 200, "startColumnIndex": kol - 1, "endColumnIndex": kol - 1 + len(kriterier)},
-                "rule": {"condition": {"type": "BOOLEAN"}, "strict": True},
+                "rule": {"condition": {"type": "BOOLEAN"}, "strict": True, "showCustomUi": True},
             }})
         kol += len(kriterier)
 
@@ -498,3 +498,58 @@ def fjern_finale_las(sh):
         hent_finale_snapshot.clear()
     except gspread.WorksheetNotFound:
         pass
+
+
+# ─────────────────────────────────────────────
+# Diagnostikk – «Test tilkobling» i Innstillinger
+# ─────────────────────────────────────────────
+def test_tilkobling(sh):
+    """Kjører en serie konkrete sjekker og returnerer en liste med
+    (ok: bool, tekst: str) – ment for å vises direkte til brukeren med
+    grønn hake/rødt kryss, slik at et problem kan forklares presist i
+    stedet for et generisk «noe gikk galt»."""
+    resultater = []
+
+    try:
+        meta = sh.client.request(
+            "get", f"https://www.googleapis.com/drive/v3/files/{sh.id}",
+            params={"fields": "mimeType,name"},
+        ).json()
+        er_sheets = meta.get("mimeType") == "application/vnd.google-apps.spreadsheet"
+        if er_sheets:
+            resultater.append((True, f"«{meta.get('name', '?')}» er et ekte Google Regneark."))
+        else:
+            resultater.append((False, f"«{meta.get('name', '?')}» er IKKE et ekte Google Regneark (mimeType: {meta.get('mimeType')}). Åpne fila i Google Sheets og velg Fil → «Lagre som Google Regneark» – appen kan ikke skrive til en ren Office-fil."))
+    except Exception as e:
+        resultater.append((False, f"Kunne ikke sjekke dokumenttype via Drive-API: {e}"))
+
+    try:
+        faner = [w.title for w in sh.worksheets()]
+        resultater.append((True, f"Appen har lesetilgang ({len(faner)} faner funnet)."))
+    except Exception as e:
+        resultater.append((False, f"Mangler lesetilgang til regnearket: {e}. Del det med tjenestekontoens e-post (Redigerer-tilgang)."))
+        return resultater
+
+    try:
+        fase1 = sh.worksheet(FASE1_FANE)
+        fase1.update([["test"]], range_name="ZZ500")
+        fase1.update([[""]], range_name="ZZ500")
+        resultater.append((True, "Appen har skrivetilgang."))
+    except Exception as e:
+        resultater.append((False, f"Mangler skrivetilgang: {e}. Del regnearket med tjenestekontoens e-post og gi Redigerer-tilgang (ikke bare Kan se)."))
+
+    for navn in [FASE1_FANE, FASE2_FANE, "Jury", "Kriterier"]:
+        try:
+            ws = sh.worksheet(navn)
+            if navn in (FASE1_FANE, FASE2_FANE, "Jury"):
+                grunn, krit, _ = _header_data(ws, grunnkolonner=(["Navn", "E-post", "Farge"] if navn == "Jury" else None))
+                if grunn and krit:
+                    resultater.append((True, f"Fanen «{navn}» finnes, og overskriftene leses riktig ({len(krit)} kriterium-kolonner funnet)."))
+                else:
+                    resultater.append((False, f"Fanen «{navn}» finnes, men overskriftene i rad 1/2 kunne ikke leses riktig – sjekk at de ikke er endret manuelt."))
+            else:
+                resultater.append((True, f"Fanen «{navn}» finnes."))
+        except gspread.WorksheetNotFound:
+            resultater.append((False, f"Fanen «{navn}» mangler ennå." + (" Opprettes automatisk når noen lagrer en vurdering/jurymedlem." if navn in (FASE2_FANE, "Jury") else "")))
+
+    return resultater

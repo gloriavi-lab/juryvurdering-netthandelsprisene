@@ -13,6 +13,7 @@ from jury import (
 from sheets import (
     FASE1_FANE, FASE2_FANE, er_finale_last, finale_las_info, fjern_finale_las,
     legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, read_fase1_scores, read_ratings, read_stores,
+    test_tilkobling,
 )
 from theme import FAGFELT_FARGE
 
@@ -23,13 +24,28 @@ sh = st.session_state.get("_sh")
 st.subheader("Google Sheets", anchor=False)
 status_prikk(sh is not None)
 if sh:
-    st.link_button("Åpne regnearket", sh.url, icon=":material/open_in_new:")
-    if st.button("Hent siste fra regnearket", icon=":material/refresh:", help="Tømmer mellomlagringen – nyttig rett etter du har redigert noe manuelt i Sheets."):
+    bc1, bc2, bc3 = st.columns(3)
+    bc1.link_button("Åpne regnearket", sh.url, icon=":material/open_in_new:", use_container_width=True)
+    if bc2.button("Hent siste fra regnearket", icon=":material/refresh:", use_container_width=True, help="Tømmer mellomlagringen – nyttig rett etter du har redigert noe manuelt i Sheets."):
         read_stores.clear()
         read_ratings.clear()
         read_fase1_scores.clear()
         st.toast("Hentet siste versjon fra regnearket.", icon=":material/check_circle:")
         st.rerun()
+    if bc3.button("Test tilkobling", icon=":material/network_check:", use_container_width=True):
+        st.session_state["_vis_tilkoblingstest"] = True
+
+    if st.session_state.get("_vis_tilkoblingstest"):
+        with st.spinner("Tester tilkoblingen …"):
+            try:
+                resultater = test_tilkobling(sh)
+            except Exception as e:
+                resultater = [(False, f"Testen selv feilet uventet: {e}")]
+        for ok, tekst in resultater:
+            if ok:
+                st.success(tekst, icon=":material/check_circle:")
+            else:
+                st.error(tekst, icon=":material/cancel:")
 else:
     with st.expander("Feilmelding"):
         st.code(st.session_state.get("_gsheets_feil", "Ukjent feil"))
@@ -109,6 +125,8 @@ def jury_dialog(redigerer_navn=None):
     eksisterende = jury.get(redigerer_navn, {}) if redigerer_navn else {}
     mine_na = eksisterende.get("kriterier", set())
 
+    feil_plassholder = st.empty()
+
     navn_input = st.text_input("Navn", value=redigerer_navn or "", disabled=bool(redigerer_navn))
 
     def _sett_alle(kriterier, nokkel_prefiks, alle_nokkel):
@@ -118,13 +136,16 @@ def jury_dialog(redigerer_navn=None):
 
     nye_valgt = set()
     for fagfelt, kriterier in felt_dict.items():
-        fc1, fc2 = st.columns([4, 1])
+        fc1, fc2 = st.columns([4, 1], vertical_alignment="center")
         fc1.markdown(f"<span style='color:{FAGFELT_FARGE.get(fagfelt, '#888')};font-weight:700;'>{fagfelt}</span>", unsafe_allow_html=True)
         alle_nokkel = f"dchk_{dialog_id}_alle_{fagfelt}"
-        fc2.checkbox(
-            "Alle", value=all(k in mine_na for k in kriterier), key=alle_nokkel,
-            on_change=_sett_alle, args=(kriterier, f"dchk_{dialog_id}_", alle_nokkel),
-        )
+        with fc2:
+            _, kol_hoyre = st.columns([1, 2])  # dytter avkrysningen mot høyre i den smale kolonnen
+            with kol_hoyre:
+                st.checkbox(
+                    "Alle", value=all(k in mine_na for k in kriterier), key=alle_nokkel,
+                    on_change=_sett_alle, args=(kriterier, f"dchk_{dialog_id}_", alle_nokkel),
+                )
         for k in kriterier:
             chk_nokkel = f"dchk_{dialog_id}_{k}"
             if chk_nokkel not in st.session_state:
@@ -138,9 +159,9 @@ def jury_dialog(redigerer_navn=None):
     if c2.button("Lagre", type="primary", use_container_width=True, icon=":material/save:"):
         navn_rengjort = (redigerer_navn or navn_input).strip()
         if not navn_rengjort:
-            st.error("Navn kan ikke være tomt.")
+            feil_plassholder.error("Navn kan ikke være tomt.", icon=":material/error:")
         elif not redigerer_navn and navn_rengjort.lower() in {n.lower() for n in jury}:
-            st.error(f"«{navn_rengjort}» finnes allerede i lista.")
+            feil_plassholder.error(f"«{navn_rengjort}» finnes allerede i lista.", icon=":material/error:")
         else:
             try:
                 write_jury(sh, navn_rengjort, nye_valgt, eksisterende.get("epost", ""), eksisterende.get("farge", ""))
@@ -148,7 +169,8 @@ def jury_dialog(redigerer_navn=None):
                 st.session_state["_jury_dialog_for"] = None
                 st.rerun()
             except Exception as e:
-                _sheets_feilboks(e)
+                with feil_plassholder:
+                    _sheets_feilboks(e)
 
     if redigerer_navn:
         st.divider()
@@ -174,6 +196,7 @@ def jury_dialog(redigerer_navn=None):
 
 @st.dialog("Kriterium")
 def kriterium_dialog(redigerer_kriterium=None):
+    feil_plassholder_krit = st.empty()
     eksisterende = next((k for k in alle_kriterier if k["kriterium"] == redigerer_kriterium), {}) if redigerer_kriterium else {}
     fagfelt_valg = list(felt_dict.keys()) or fagfelt_liste(alle_kriterier)
     fagfelt_sel = st.selectbox("Fagfelt", fagfelt_valg, index=fagfelt_valg.index(eksisterende["fagfelt"]) if eksisterende.get("fagfelt") in fagfelt_valg else 0)
@@ -194,7 +217,7 @@ def kriterium_dialog(redigerer_kriterium=None):
         st.rerun()
     if c2.button("Lagre", type="primary", use_container_width=True, icon=":material/save:"):
         if not navn_sel.strip():
-            st.error("Kriterium-navn kan ikke være tomt.")
+            feil_plassholder_krit.error("Kriterium-navn kan ikke være tomt.", icon=":material/error:")
         else:
             try:
                 if redigerer_kriterium:
@@ -211,7 +234,8 @@ def kriterium_dialog(redigerer_kriterium=None):
                 st.toast("Lagret", icon=":material/check_circle:")
                 st.rerun()
             except Exception as e:
-                _sheets_feilboks(e)
+                with feil_plassholder_krit:
+                    _sheets_feilboks(e)
 
 
 fane_jury, fane_kriterier = st.tabs(["Jury", "Kriterier"])
@@ -219,7 +243,15 @@ fane_jury, fane_kriterier = st.tabs(["Jury", "Kriterier"])
 with fane_jury:
     manglende = [k for k, antall in antall_jury_per_kriterium.items() if antall == 0]
     if manglende:
-        st.warning(f"{len(manglende)} kriterier mangler jurymedlem: {', '.join(manglende)}", icon=":material/warning:")
+        st.warning(f"{len(manglende)} kriterier mangler jurymedlem.", icon=":material/warning:")
+        with st.expander("Vis hvilke"):
+            for fagfelt, kriterier in felt_dict.items():
+                manglende_i_felt = [k for k in kriterier if k in manglende]
+                if manglende_i_felt:
+                    farge_mangel = FAGFELT_FARGE.get(fagfelt, "#888")
+                    st.markdown(f"<span style='color:{farge_mangel};font-weight:700;'>{fagfelt}</span>", unsafe_allow_html=True)
+                    for k in manglende_i_felt:
+                        st.caption(f"• {k}")
 
     if st.button("Legg til jurymedlem", type="primary", icon=":material/person_add:"):
         jury_dialog()

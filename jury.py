@@ -181,7 +181,7 @@ def sikre_jury_fane(sh):
     try:
         return sh.worksheet(JURY_FANE)
     except gspread.WorksheetNotFound:
-        kriterier = aktive_kriterier(read_criteria(sh))
+        kriterier = aktive_kriterier(read_criteria(sh), fase="Fase 3")
         ws = _bygg_gruppert_header(sh, JURY_FANE, JURY_GRUNNKOLONNER, kriterier_per_fagfelt(kriterier), checkbox=True)
         return ws
 
