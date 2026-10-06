@@ -9,7 +9,7 @@ import streamlit as st
 from components import rutenett
 from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_faser, read_jury, read_veiledning
 from sheets import read_stores
-from theme import FAGFELT_FARGE
+from theme import FAGFELT_FARGE, KLASSE_IKON, KLASSE_TONE
 
 
 def _bryt_etter_skratrek(tekst: str) -> str:
@@ -79,8 +79,6 @@ antall_per_klasse = {k: 0 for k, _ in KLASSE_DEFINISJON}
 for info in butikker.values():
     if info.get("klasse") in antall_per_klasse:
         antall_per_klasse[info["klasse"]] += 1
-KLASSE_IKON = {"Liten": "🌱", "Medium": "🌿", "Stor": "🌳"}
-KLASSE_TONE = {"Liten": "#E7F3EC", "Medium": "#E6F0F5", "Stor": "#FBF1E0"}
 deler = [
     f'<div class="rutenett-kort" style="background:{KLASSE_TONE.get(k, "")};border-top-color:transparent;">'
     f'<div class="kort-ikon">{KLASSE_IKON.get(k, "")}</div><div class="stor-tall">{antall_per_klasse[k]}</div>'

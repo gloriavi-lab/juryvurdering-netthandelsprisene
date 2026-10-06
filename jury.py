@@ -211,7 +211,9 @@ def read_jury(_sh):
 
 def write_jury(sh, navn, kriterier_valgt: set, epost="", farge=""):
     """Oppretter raden for jurymedlemmet hvis den mangler, ellers oppdaterer
-    kun DENNE radens celler – aldri resten av fanen."""
+    kun DENNE radens celler – aldri resten av fanen. Finner cellene for
+    Navn/E-post/Farge på overskriftene (ALDRI faste bokstaver), akkurat som
+    kriterium-cellene."""
     ws = sikre_jury_fane(sh)
     grunn, krit, siste = _header_data(ws, grunnkolonner=JURY_GRUNNKOLONNER)
     jury = read_jury(sh)
@@ -224,15 +226,33 @@ def write_jury(sh, navn, kriterier_valgt: set, epost="", farge=""):
         # rader allokert (se _bygg_gruppert_header), og batch_update under
         # skriver hele raden i ett kall.
 
-    oppdateringer = [
-        {"range": f"A{rad_nr}", "values": [[navn]]},
-        {"range": f"B{rad_nr}", "values": [[epost]]},
-        {"range": f"C{rad_nr}", "values": [[farge]]},
-    ]
+    oppdateringer = []
+    for kolonnenavn, verdi in [("Navn", navn), ("E-post", epost), ("Farge", farge)]:
+        kol = grunn.get(kolonnenavn)
+        if kol:
+            oppdateringer.append({"range": gspread.utils.rowcol_to_a1(rad_nr, kol), "values": [[verdi]]})
     for (fagfelt, kriterium), kol in krit.items():
         a1 = gspread.utils.rowcol_to_a1(rad_nr, kol)
         oppdateringer.append({"range": a1, "values": [[kriterium in kriterier_valgt]]})
+
+    if not oppdateringer:
+        raise ValueError("Fant ingen kolonner å skrive til i Jury-fanen – sjekk at overskriftene i rad 1/2 ikke er endret manuelt.")
     ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
+    read_jury.clear()
+
+
+def slett_jurymedlem(sh, navn):
+    """Fjerner jurymedlemmets RAD i Jury-fanen (deleteDimension – skyver
+    radene under oppover). Rører ALDRI Rangering-fanene, så vurderinger
+    personen har gjort der ligger urørt."""
+    ws = sikre_jury_fane(sh)
+    jury = read_jury(sh)
+    if navn not in jury:
+        return
+    rad_nr = jury[navn]["rad"]
+    ws.spreadsheet.batch_update({"requests": [{
+        "deleteDimension": {"range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": rad_nr - 1, "endIndex": rad_nr}}
+    }]})
     read_jury.clear()
 
 

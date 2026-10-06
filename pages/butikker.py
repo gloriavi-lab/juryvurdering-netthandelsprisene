@@ -1,15 +1,17 @@
-"""Side 3 – Butikker: totaloversikt over ALLE nettbutikkene, i en tabell som
-speiler regnearkets fargede, grupperte oppsett (se components.regneark_tabell).
-Kriteriene er datastyrt (Kriterier-fanen), ikke lenger hardkodet."""
+"""Side 3 – Butikker: totaloversikt over ALLE nettbutikkene. To visninger
+(st.segmented_control): «Oversikt» (kompakt, standard – én rad per butikk,
+snitt per fagfelt) og «Detaljert» (regnearkets fulle kriterieoppsett, AgGrid,
+grupperte fargede overskrifter). Klikk på en butikk åpner detaljpanelet."""
 
 from collections import defaultdict
 
 import streamlit as st
 
-from components import regneark_tabell, rutenett, topptekst
-from data import KLASSE_DEFINISJON, er_tall, status_for_scorer
-from jury import aktive_kriterier, beskriv_tildeling, fagfelt_liste, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
+from components import regneark_tabell, topptekst
+from data import er_tall, snitt_av_scorer, status_for_scorer
+from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, read_criteria
 from sheets import read_ratings, read_stores
+from theme import FAGFELT_FARGE, KLASSE_IKON, KLASSE_TONE
 
 topptekst("Butikker")
 
@@ -21,7 +23,6 @@ if not sh:
 try:
     butikker, _ = read_stores(sh)
     rating_data = read_ratings(sh)
-    jury = read_jury(sh)
     kriterier_fase3 = aktive_kriterier(read_criteria(sh), fase="Fase 3")
 except Exception as e:
     st.error(f"Kunne ikke lese regnearket: {e}", icon=":material/error:")
@@ -36,12 +37,25 @@ if not butikker:
     st.stop()
 
 
+def scorer_for(navn):
+    return rating_data.get(navn, {}).get("scorer", {})
+
+
 def fase_status(navn):
-    scorer = rating_data.get(navn, {}).get("scorer", {})
-    return status_for_scorer(scorer, ALLE_KRITERIER_FLAT)
+    return status_for_scorer(scorer_for(navn), ALLE_KRITERIER_FLAT)
 
 
-# ── Oppsummering ──
+def snitt_totalt(navn):
+    return snitt_av_scorer(scorer_for(navn), ALLE_KRITERIER_FLAT)
+
+
+def fremdrift_brok(navn):
+    s = scorer_for(navn)
+    besvart = sum(1 for k in ALLE_KRITERIER_FLAT if k in s and s[k])
+    return besvart, len(ALLE_KRITERIER_FLAT)
+
+
+# ── Oppsummeringskort (samme fargetoner som størrelseskortene på Oversikt) ──
 klasser_count = defaultdict(int)
 status_count = defaultdict(int)
 for navn, info in butikker.items():
@@ -49,20 +63,27 @@ for navn, info in butikker.items():
     status_count[fase_status(navn)] += 1
 
 total_fremdrift = round((status_count["Ferdig"] / len(butikker)) * 100) if butikker else 0
-oppsummering_kort = [
-    f'<div class="stor-tall">{len(butikker)}</div><div class="belop">butikker totalt</div>',
-    f'<div class="stor-tall">{total_fremdrift}%</div><div class="belop">ferdig vurdert</div>',
-] + [f'<div class="stor-tall">{klasser_count.get(k, 0)}</div><div class="belop">{k}</div>' for k, _ in KLASSE_DEFINISJON]
-rutenett(oppsummering_kort)
+deler = [
+    f'<div class="rutenett-kort"><h4 style="margin:0 0 8px 0;">Butikker</h4><div class="stor-tall">{len(butikker)}</div><div class="belop">totalt i konkurransen</div></div>',
+    (
+        '<div class="rutenett-kort"><h4 style="margin:0 0 8px 0;">Ferdig vurdert</h4>'
+        f'<div class="stor-tall">{total_fremdrift}%</div>'
+        f'<div class="fremdrift-bakgrunn" style="margin-top:8px;"><div class="fremdrift-fyll" style="width:{total_fremdrift}%;"></div></div></div>'
+    ),
+] + [
+    f'<div class="rutenett-kort" style="background:{KLASSE_TONE.get(k, "")};border-top-color:transparent;">'
+    f'<div class="kort-ikon">{KLASSE_IKON.get(k, "")}</div><div class="stor-tall">{klasser_count.get(k, 0)}</div><div style="font-weight:700;">{k}</div></div>'
+    for k in ["Liten", "Medium", "Stor"]
+]
+st.markdown(f'<div class="rutenett">{"".join(deler)}</div>', unsafe_allow_html=True)
 
 st.divider()
 st.subheader("Alle butikker", anchor=False)
-st.caption("Tabellen speiler regnearkets oppsett – grupperte, fargede overskrifter per fagfelt, Butikk/Klasse festet ved sidescrolling.")
 
-sok = st.text_input("🔍 Søk etter butikk", "")
-fc1, fc2 = st.columns(2)
-klasse_filter = fc1.multiselect("Størrelsesklasse", sorted({i.get("klasse", "") for i in butikker.values() if i.get("klasse")}))
-fagfelt_filter = fc2.multiselect("Vis kun fagfelt", FAGFELT)
+sc1, sc2, sc3 = st.columns([2, 1, 1])
+sok = sc1.text_input("Søk", placeholder="Søk etter butikk …", icon=":material/search:", label_visibility="collapsed")
+klasse_filter = sc2.multiselect("Størrelsesklasse", sorted({i.get("klasse", "") for i in butikker.values() if i.get("klasse")}), placeholder="Alle størrelser", label_visibility="collapsed")
+fagfelt_filter = sc3.multiselect("Fagfelt", FAGFELT, placeholder="Alle fagfelt", label_visibility="collapsed")
 
 navn_liste = sorted(butikker.keys())
 if sok:
@@ -70,25 +91,74 @@ if sok:
 if klasse_filter:
     navn_liste = [n for n in navn_liste if butikker[n].get("klasse") in klasse_filter]
 
-st.caption(f"{len(navn_liste)} av {len(butikker)} butikker")
-regneark_tabell(butikker, rating_data, KRITERIER_PER_FAGFELT, navn_liste=navn_liste, fagfelt_liste=fagfelt_filter or None)
+visning = st.segmented_control("Visning", ["Oversikt", "Detaljert"], default="Oversikt", label_visibility="collapsed")
+st.write("")
 
-st.divider()
 
-# ── Jury-oversikt (per-kriterium-tildeling, ikke hele fagfelt) ──
-st.subheader("Jury-oversikt", anchor=False)
-st.caption("Fremdrift per jurymedlem, basert på kriteriene de faktisk er tildelt i Jury-fanen.")
+@st.dialog("Butikkdetaljer", width="large")
+def vis_detaljpanel(navn):
+    info = butikker[navn]
+    st.markdown(f"## {navn}")
+    st.caption(f"{info.get('klasse', '–')} · {info.get('bransje', '–')}")
+    if info.get("url"):
+        st.link_button("Besøk butikk", info["url"], icon=":material/open_in_new:")
+    st.divider()
 
-jury_rader = []
-for navn in sorted(jury.keys()):
-    mine = mine_kriterier(jury, navn)
-    if not mine:
-        jury_rader.append({"Jurymedlem": navn, "Tildeling": "Ingen kriterier tildelt", "Ferdig": 0, "Totalt": 0})
-        continue
-    ferdig = sum(1 for n in butikker if status_for_scorer(rating_data.get(n, {}).get("scorer", {}), list(mine)) == "Ferdig")
-    jury_rader.append({"Jurymedlem": navn, "Tildeling": beskriv_tildeling(navn, jury, KRITERIER_PER_FAGFELT), "Ferdig": ferdig, "Totalt": len(butikker)})
+    scorer = scorer_for(navn)
+    for fagfelt in FAGFELT:
+        kriterier = KRITERIER_PER_FAGFELT[fagfelt]
+        fagfelt_snitt = snitt_av_scorer(scorer, kriterier)
+        farge = FAGFELT_FARGE.get(fagfelt, "#888")
+        st.markdown(
+            f'<div style="border-left:4px solid {farge};padding-left:10px;margin:12px 0 6px 0;font-weight:700;">'
+            f'{fagfelt}{f" — snitt {fagfelt_snitt:.2f}" if fagfelt_snitt is not None else " — ingen vurdering"}</div>',
+            unsafe_allow_html=True,
+        )
+        for k in kriterier:
+            verdi = scorer.get(k)
+            if verdi is None:
+                st.caption(f"{k}: ikke vurdert")
+            elif er_tall(verdi):
+                st.caption(f"{k}: {'⭐' * int(verdi)}")
+            else:
+                st.caption(f"{k}: {verdi}")
 
-st.dataframe(
-    jury_rader, hide_index=True, use_container_width=True,
-    column_config={"Ferdig": st.column_config.ProgressColumn("Fremdrift", min_value=0, max_value=len(butikker))},
-)
+    kommentarer = rating_data.get(navn, {}).get("kommentarer", {})
+    if any(kommentarer.values()):
+        st.divider()
+        st.markdown("**Kommentarer**")
+        for fagfelt, kommentar in kommentarer.items():
+            if kommentar:
+                st.caption(f"_{fagfelt}:_ {kommentar}")
+
+
+if visning == "Detaljert":
+    regneark_tabell(butikker, rating_data, KRITERIER_PER_FAGFELT, navn_liste=navn_liste, fagfelt_liste=fagfelt_filter or None)
+else:
+    rader = []
+    for navn in navn_liste:
+        info = butikker[navn]
+        rad = {"Butikk": navn, "Klasse": info.get("klasse", "–"), "Bransje": info.get("bransje", "–"), "Besøk": info.get("url", "")}
+        for fagfelt in (fagfelt_filter or FAGFELT):
+            sn = snitt_av_scorer(scorer_for(navn), KRITERIER_PER_FAGFELT[fagfelt])
+            rad[fagfelt] = round(sn, 2) if sn is not None else None
+        besvart, totalt_krit = fremdrift_brok(navn)
+        rad["Fremdrift"] = (besvart / totalt_krit) if totalt_krit else 0
+        rad["Status"] = fase_status(navn)
+        st_total = snitt_totalt(navn)
+        rad["Snitt totalt"] = round(st_total, 2) if st_total is not None else None
+        rader.append(rad)
+
+    column_config = {
+        "Besøk": st.column_config.LinkColumn("Besøk", display_text="Besøk →"),
+        "Fremdrift": st.column_config.ProgressColumn("Fremdrift", min_value=0, max_value=1, help=f"Antall av {len(ALLE_KRITERIER_FLAT)} kriterier vurdert"),
+        "Snitt totalt": st.column_config.NumberColumn("Snitt totalt", format="%.2f"),
+    }
+    for fagfelt in (fagfelt_filter or FAGFELT):
+        column_config[fagfelt] = st.column_config.NumberColumn(fagfelt, format="%.2f", help=f"Snitt for {fagfelt}")
+
+    st.caption(f"{len(rader)} av {len(butikker)} butikker")
+    hendelse = st.dataframe(rader, hide_index=True, use_container_width=True, column_config=column_config, on_select="rerun", selection_mode="single-row")
+    if hendelse and hendelse.selection and hendelse.selection.rows:
+        valgt_navn = rader[hendelse.selection.rows[0]]["Butikk"]
+        vis_detaljpanel(valgt_navn)

@@ -130,9 +130,18 @@ def regneark_tabell(butikker: dict, ratings: dict, kriterier_per_fagfelt: dict, 
         rader.append(rad)
     df = pd.DataFrame(rader)
 
+    # Returnerer et EKTE DOM-element (ikke en HTML-streng) – strenger blir i
+    # noen ag-Grid-versjoner satt som ren tekst (innerText) i stedet for
+    # tolket som HTML, som ga rå "<a href=...>"-tekst i cellen i stedet for
+    # en klikkbar lenke. Et DOM-element unngår den tvetydigheten helt.
     lenke_renderer = JsCode(
-        "function(params) { if (!params.value) { return ''; } "
-        "return '<a href=\"' + params.value + '\" target=\"_blank\">Besøk ↗</a>'; }"
+        "function(params) {"
+        "  if (!params.value) { return document.createTextNode(''); }"
+        "  var a = document.createElement('a');"
+        "  a.href = params.value; a.target = '_blank'; a.rel = 'noopener';"
+        "  a.innerText = 'Besøk →'; a.style.color = '#C8102E';"
+        "  return a;"
+        "}"
     )
     kolonne_defs = [
         {"field": "Butikk", "headerName": "Butikk", "pinned": "left", "width": 170},
@@ -141,7 +150,14 @@ def regneark_tabell(butikker: dict, ratings: dict, kriterier_per_fagfelt: dict, 
         {"field": "URL", "headerName": "Lenke", "width": 100, "cellRenderer": lenke_renderer},
     ]
 
-    custom_css = {}
+    custom_css = {
+        ".ag-root-wrapper, .ag-header-cell, .ag-cell, .ag-header-group-cell": {
+            "font-family": "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif !important",
+            "font-size": "13px !important",
+        },
+        ".ag-header": {"background-color": "var(--lys-bakgrunn, #FAFAF9) !important", "border-bottom": "1px solid var(--kant, #E5E3DF) !important"},
+        ".ag-header-cell-text": {"color": "var(--tekst, #1C1C1C) !important", "font-weight": "600 !important"},
+    }
     for fagfelt in fagfelt_liste:
         farge = FAGFELT_FARGE.get(fagfelt, "#888888")
         klasse_css = f"fagfelt-{_slug(fagfelt)}"
@@ -151,7 +167,7 @@ def regneark_tabell(butikker: dict, ratings: dict, kriterier_per_fagfelt: dict, 
             if felt not in df.columns:
                 continue
             barn.append({
-                "field": felt, "headerName": krit, "width": 120,
+                "field": felt, "headerName": krit[:16] + ("…" if len(krit) > 16 else ""), "headerTooltip": krit, "width": 110,
                 "cellStyle": JsCode(f"function(p) {{ return p.value ? {{backgroundColor: '{farge}22'}} : {{}}; }}"),
             })
         if barn:
@@ -166,6 +182,7 @@ def regneark_tabell(butikker: dict, ratings: dict, kriterier_per_fagfelt: dict, 
     grid_options = {
         "columnDefs": kolonne_defs,
         "defaultColDef": {"resizable": True, "sortable": True, "filter": True},
+        "tooltipShowDelay": 200,
         "headerHeight": 36,
         "groupHeaderHeight": 36,
     }

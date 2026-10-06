@@ -20,6 +20,12 @@ FAGFELT_FARGE = {
 }
 GRUNNKOLONNE_FARGE = "#203864"  # Butikk/Jurymedlem/Klasse/Bransje/URL/Snitt totalt
 
+# Størrelsesklasser – samme toner brukt på Oversikt og Butikker-siden
+KLASSE_IKON = {"Liten": "🌱", "Medium": "🌿", "Stor": "🌳"}
+KLASSE_TONE = {"Liten": "#E7F3EC", "Medium": "#E6F0F5", "Stor": "#FBF1E0"}
+
+STATUS_FARGE = {"Ferdig": "#1E8E5A", "Påbegynt": "#C8A200", "Ikke startet": "#8A8780"}
+
 # Radfarger per (Fase 1-)jurymedlem, hentet fra samme fil. Navnene her er
 # skrevet EKSAKT som i regnearkets "Jurymedlem"-kolonne i dag (bl.a. "Ole" og
 # "Stian/K", ikke "Ole Johan"/"Stian") – se spørsmål til bruker om hvordan

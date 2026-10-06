@@ -8,7 +8,7 @@ import streamlit as st
 from components import status_prikk, topptekst
 from jury import (
     add_criterion, aktive_kriterier, deaktiver_kriterium, fagfelt_liste, kriterier_per_fagfelt,
-    read_criteria, read_jury, write_jury,
+    oppdater_kriterium, read_criteria, read_jury, slett_jurymedlem, write_jury,
 )
 from sheets import (
     FASE1_FANE, FASE2_FANE, er_finale_last, finale_las_info, fjern_finale_las,
@@ -63,7 +63,7 @@ except Exception:
         read_ratings(sh)  # trigger _sikre_fase2_fane
         st.rerun()
 
-with st.expander("🔓 Tillat «Kan ikke vurdere» i nedtrekkslisten"):
+with st.expander("Tillat «Kan ikke vurdere» i nedtrekkslisten", icon=":material/lock_open:"):
     st.caption(
         "Legger «Kan ikke vurdere» til som en ekstra gyldig verdi i kriteriecellenes nedtrekksliste på "
         f"«{FASE2_FANE}» (i tillegg til 1–5). Endrer kun datavalideringen, ingen annen formatering."
@@ -79,105 +79,188 @@ alle_kriterier = read_criteria(sh)
 kriterier_fase3 = aktive_kriterier(alle_kriterier, fase="Fase 3")
 felt_dict = kriterier_per_fagfelt(kriterier_fase3)
 jury = read_jury(sh)
+navn_liste_jury = sorted(jury.keys())
+antall_jury_per_kriterium = {k: sum(1 for p in jury.values() if any(kr == k for kr in p["kriterier"])) for liste in felt_dict.values() for k in liste}
 
-st.caption("Velg én person, kryss av kriteriene de skal vurdere, lagre. Enkelt og ett steg av gangen.")
 
-if not felt_dict:
-    st.caption("Ingen aktive kriterier funnet for Fase 3 ennå.")
-else:
-    navn_liste_jury = sorted(jury.keys())
-    NYTT = "+ Nytt jurymedlem …"
-    valgt_person = st.selectbox("Jurymedlem", navn_liste_jury + [NYTT], key="_jury_admin_valgt")
+def _sheets_feilboks(e, handling="lagre"):
+    st.error(f"Kunne ikke {handling} til regnearket – prøv igjen.", icon=":material/error:")
+    with st.expander("Detaljer (for feilsøking)"):
+        st.code(str(e))
 
-    if valgt_person == NYTT:
-        nytt_navn_jury = st.text_input("Navn på nytt jurymedlem")
-        if st.button("Opprett", type="primary", icon=":material/person_add:", disabled=not nytt_navn_jury.strip()):
-            write_jury(sh, nytt_navn_jury.strip(), set())
-            st.success(f"«{nytt_navn_jury}» opprettet – velg personen i lista over for å tildele kriterier.", icon=":material/check_circle:")
-            st.rerun()
-    elif valgt_person:
-        mine_na = jury[valgt_person]["kriterier"]
-        st.markdown(f"**Kriterier for {valgt_person}:**")
 
-        def _sett_checkbox_verdier(kriterier, person, alle_nokkel):
-            verdi = st.session_state[alle_nokkel]
-            for k in kriterier:
-                st.session_state[f"chk_{person}_{k}"] = verdi
-
-        nye_valgt = set()
+def _reset_dialog_avkrysninger(dialog_id):
+    """Nullstiller avkrysningene i dialogen hver gang den åpnes for en NY
+    person (eller for "ny person") – ellers vil et forrige, kanskje
+    avbrutt, redigeringsforsøk henge igjen i session_state."""
+    if st.session_state.get("_jury_dialog_for") != dialog_id:
         for fagfelt, kriterier in felt_dict.items():
-            fc1, fc2 = st.columns([4, 1])
-            fc1.markdown(f"<span style='color:{FAGFELT_FARGE.get(fagfelt, '#888')};font-weight:700;'>{fagfelt}</span>", unsafe_allow_html=True)
-            alle_nokkel = f"alle_{valgt_person}_{fagfelt}"
-            fc2.checkbox(
-                "Alle", value=all(k in mine_na for k in kriterier), key=alle_nokkel,
-                on_change=_sett_checkbox_verdier, args=(kriterier, valgt_person, alle_nokkel),
-            )
+            st.session_state.pop(f"dchk_{dialog_id}_alle_{fagfelt}", None)
             for k in kriterier:
-                chk_nokkel = f"chk_{valgt_person}_{k}"
-                if chk_nokkel not in st.session_state:
-                    st.session_state[chk_nokkel] = k in mine_na
-                if st.checkbox(k, key=chk_nokkel):
-                    nye_valgt.add(k)
-        if st.button(f"💾 Lagre endringer for {valgt_person}", type="primary", icon=":material/save:"):
-            write_jury(sh, valgt_person, nye_valgt, jury[valgt_person].get("epost", ""), jury[valgt_person].get("farge", ""))
-            st.success(f"Lagret – {valgt_person} har nå {len(nye_valgt)} kriterier.", icon=":material/check_circle:")
-            st.rerun()
+                st.session_state.pop(f"dchk_{dialog_id}_{k}", None)
+        st.session_state["_jury_dialog_for"] = dialog_id
+        st.session_state["_bekreft_slett_jury"] = False
 
-    with st.expander("Se oversikt over alle jurymedlemmer"):
-        oversikt_rader = [{"Jurymedlem": n, "Antall kriterier": len(jury[n]["kriterier"])} for n in navn_liste_jury]
-        st.dataframe(oversikt_rader, hide_index=True, use_container_width=True)
 
-st.write("")
-with st.expander("📋 Alle kriterier (aktive og inaktive)"):
-    for k in alle_kriterier:
-        kc1, kc2 = st.columns([5, 1])
-        status_tekst = "" if k["aktiv"] else " _(inaktiv)_"
-        kc1.markdown(f"**{k['kriterium']}**{status_tekst} — {k['fagfelt']} · {', '.join(k['faser'])}")
-        if k["aktiv"] and kc2.button("Deaktiver", key=f"deaktiver_{k['kriterium']}", use_container_width=True):
-            deaktiver_kriterium(sh, k["kriterium"])
-            st.rerun()
+@st.dialog("Jurymedlem")
+def jury_dialog(redigerer_navn=None):
+    dialog_id = redigerer_navn or "_ny_"
+    _reset_dialog_avkrysninger(dialog_id)
+    eksisterende = jury.get(redigerer_navn, {}) if redigerer_navn else {}
+    mine_na = eksisterende.get("kriterier", set())
 
-@st.dialog("Sette inn ny kolonne i Rangering-fanene?")
-def bekreft_nytt_kriterium(fagfelt, navn, kort, utfyllende, skala1, skala3, skala5, eksempler, faser):
-    st.write(
-        f"Dette setter inn én ny, tom kolonne for **{navn}** i fagfeltgruppen **{fagfelt}** i de valgte Rangering-fanene. "
-        "Formatering og nedtrekksliste kopieres fra nabokolonnen. Dette er det eneste stedet appen endrer struktur i en Rangering-fane."
-    )
+    navn_input = st.text_input("Navn", value=redigerer_navn or "", disabled=bool(redigerer_navn))
+
+    def _sett_alle(kriterier, nokkel_prefiks, alle_nokkel):
+        verdi = st.session_state[alle_nokkel]
+        for k in kriterier:
+            st.session_state[f"{nokkel_prefiks}{k}"] = verdi
+
+    nye_valgt = set()
+    for fagfelt, kriterier in felt_dict.items():
+        fc1, fc2 = st.columns([4, 1])
+        fc1.markdown(f"<span style='color:{FAGFELT_FARGE.get(fagfelt, '#888')};font-weight:700;'>{fagfelt}</span>", unsafe_allow_html=True)
+        alle_nokkel = f"dchk_{dialog_id}_alle_{fagfelt}"
+        fc2.checkbox(
+            "Alle", value=all(k in mine_na for k in kriterier), key=alle_nokkel,
+            on_change=_sett_alle, args=(kriterier, f"dchk_{dialog_id}_", alle_nokkel),
+        )
+        for k in kriterier:
+            chk_nokkel = f"dchk_{dialog_id}_{k}"
+            if chk_nokkel not in st.session_state:
+                st.session_state[chk_nokkel] = k in mine_na
+            if st.checkbox(k, key=chk_nokkel):
+                nye_valgt.add(k)
+
     c1, c2 = st.columns(2)
     if c1.button("Avbryt", use_container_width=True):
         st.rerun()
-    if c2.button("Ja, sett inn", type="primary", use_container_width=True, icon=":material/view_column:"):
-        add_criterion(sh, fagfelt, navn, kort, utfyllende, skala1, skala3, skala5, eksempler, faser)
-        if "Fase 2" in faser:
-            legg_til_kriterium_kolonne(sh, FASE1_FANE, fagfelt, navn)
-        if "Fase 3" in faser:
-            legg_til_kriterium_kolonne(sh, FASE2_FANE, fagfelt, navn)
-        st.success(f"«{navn}» lagt til og kolonne satt inn.", icon=":material/check_circle:")
-        st.rerun()
-
-
-with st.expander("➕ Legg til nytt kriterium"):
-    with st.form("nytt_kriterium_form"):
-        fagfelt_nytt = st.selectbox("Fagfelt", list(felt_dict.keys()) if felt_dict else fagfelt_liste(alle_kriterier))
-        navn_nytt = st.text_input("Kriterium (navn)")
-        kort_nytt = st.text_input("Kort beskrivelse")
-        utfyllende_nytt = st.text_area("Utfyllende forklaring", height=80)
-        s1, s3, s5 = st.columns(3)
-        skala1_nytt = s1.text_input("Hva gir 1")
-        skala3_nytt = s3.text_input("Hva gir 3")
-        skala5_nytt = s5.text_input("Hva gir 5")
-        eksempler_nytt = st.text_input("Eksempler")
-        faser_nytt = st.multiselect("Brukes i fase(r)", ["Fase 2", "Fase 3", "Testhandel"], default=["Fase 3"])
-        sett_inn_kolonne = st.checkbox("Sett også inn ny kolonne i Rangering-fanene for valgt(e) fase(r) nå", value=False)
-        lagt_til = st.form_submit_button("Legg til kriterium", icon=":material/add_circle:")
-
-    if lagt_til and navn_nytt.strip():
-        if sett_inn_kolonne:
-            bekreft_nytt_kriterium(fagfelt_nytt, navn_nytt.strip(), kort_nytt, utfyllende_nytt, skala1_nytt, skala3_nytt, skala5_nytt, eksempler_nytt, faser_nytt)
+    if c2.button("Lagre", type="primary", use_container_width=True, icon=":material/save:"):
+        navn_rengjort = (redigerer_navn or navn_input).strip()
+        if not navn_rengjort:
+            st.error("Navn kan ikke være tomt.")
+        elif not redigerer_navn and navn_rengjort.lower() in {n.lower() for n in jury}:
+            st.error(f"«{navn_rengjort}» finnes allerede i lista.")
         else:
-            add_criterion(sh, fagfelt_nytt, navn_nytt.strip(), kort_nytt, utfyllende_nytt, skala1_nytt, skala3_nytt, skala5_nytt, eksempler_nytt, faser_nytt)
-            st.success(f"«{navn_nytt}» lagt til i Kriterier-fanen (ingen kolonne satt inn i Rangering-fanene).", icon=":material/check_circle:")
+            try:
+                write_jury(sh, navn_rengjort, nye_valgt, eksisterende.get("epost", ""), eksisterende.get("farge", ""))
+                st.toast("Lagret", icon=":material/check_circle:")
+                st.session_state["_jury_dialog_for"] = None
+                st.rerun()
+            except Exception as e:
+                _sheets_feilboks(e)
+
+    if redigerer_navn:
+        st.divider()
+        if not st.session_state.get("_bekreft_slett_jury"):
+            if st.button("Fjern jurymedlem", icon=":material/delete:", use_container_width=True):
+                st.session_state["_bekreft_slett_jury"] = True
+                st.rerun()
+        else:
+            st.warning(f"Fjerne **{redigerer_navn}**? Vurderinger personen allerede har gjort i regnearket beholdes.", icon=":material/warning:")
+            w1, w2 = st.columns(2)
+            if w1.button("Avbryt", key="avbryt_slett_jury", use_container_width=True):
+                st.session_state["_bekreft_slett_jury"] = False
+                st.rerun()
+            if w2.button("Ja, fjern", type="primary", key="bekreft_slett_jury", use_container_width=True):
+                try:
+                    slett_jurymedlem(sh, redigerer_navn)
+                    st.toast("Fjernet", icon=":material/check_circle:")
+                    st.session_state["_jury_dialog_for"] = None
+                    st.rerun()
+                except Exception as e:
+                    _sheets_feilboks(e, "fjerne")
+
+
+@st.dialog("Kriterium")
+def kriterium_dialog(redigerer_kriterium=None):
+    eksisterende = next((k for k in alle_kriterier if k["kriterium"] == redigerer_kriterium), {}) if redigerer_kriterium else {}
+    fagfelt_valg = list(felt_dict.keys()) or fagfelt_liste(alle_kriterier)
+    fagfelt_sel = st.selectbox("Fagfelt", fagfelt_valg, index=fagfelt_valg.index(eksisterende["fagfelt"]) if eksisterende.get("fagfelt") in fagfelt_valg else 0)
+    navn_sel = st.text_input("Kriterium (navn)", value=eksisterende.get("kriterium", ""), disabled=bool(redigerer_kriterium))
+    kort_sel = st.text_input("Kort beskrivelse", value=eksisterende.get("kort", ""))
+    utfyllende_sel = st.text_area("Utfyllende forklaring", value=eksisterende.get("utfyllende", ""), height=80)
+    s1, s3, s5 = st.columns(3)
+    skala1_sel = s1.text_input("Hva gir 1", value=eksisterende.get("skala1", ""))
+    skala3_sel = s3.text_input("Hva gir 3", value=eksisterende.get("skala3", ""))
+    skala5_sel = s5.text_input("Hva gir 5", value=eksisterende.get("skala5", ""))
+    eksempler_sel = st.text_input("Eksempler", value=eksisterende.get("eksempler", ""))
+    faser_sel = st.multiselect("Brukes i fase(r)", ["Fase 2", "Fase 3", "Testhandel"], default=eksisterende.get("faser", ["Fase 3"]))
+    aktiv_sel = st.checkbox("Aktiv", value=eksisterende.get("aktiv", True)) if redigerer_kriterium else True
+    sett_inn_kolonne = st.checkbox("Sett også inn ny kolonne i Rangering-fanene nå", value=False, disabled=bool(redigerer_kriterium), help="Kun aktuelt for nye kriterier.")
+
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True):
+        st.rerun()
+    if c2.button("Lagre", type="primary", use_container_width=True, icon=":material/save:"):
+        if not navn_sel.strip():
+            st.error("Kriterium-navn kan ikke være tomt.")
+        else:
+            try:
+                if redigerer_kriterium:
+                    oppdater_kriterium(sh, redigerer_kriterium, kort=kort_sel, utfyllende=utfyllende_sel, skala1=skala1_sel, skala3=skala3_sel, skala5=skala5_sel, eksempler=eksempler_sel)
+                    if not aktiv_sel:
+                        deaktiver_kriterium(sh, redigerer_kriterium)
+                else:
+                    add_criterion(sh, fagfelt_sel, navn_sel.strip(), kort_sel, utfyllende_sel, skala1_sel, skala3_sel, skala5_sel, eksempler_sel, faser_sel)
+                    if sett_inn_kolonne:
+                        if "Fase 2" in faser_sel:
+                            legg_til_kriterium_kolonne(sh, FASE1_FANE, fagfelt_sel, navn_sel.strip())
+                        if "Fase 3" in faser_sel:
+                            legg_til_kriterium_kolonne(sh, FASE2_FANE, fagfelt_sel, navn_sel.strip())
+                st.toast("Lagret", icon=":material/check_circle:")
+                st.rerun()
+            except Exception as e:
+                _sheets_feilboks(e)
+
+
+fane_jury, fane_kriterier = st.tabs(["Jury", "Kriterier"])
+
+with fane_jury:
+    manglende = [k for k, antall in antall_jury_per_kriterium.items() if antall == 0]
+    if manglende:
+        st.warning(f"{len(manglende)} kriterier mangler jurymedlem: {', '.join(manglende)}", icon=":material/warning:")
+
+    if st.button("Legg til jurymedlem", type="primary", icon=":material/person_add:"):
+        jury_dialog()
+
+    st.write("")
+    if not navn_liste_jury:
+        st.caption("Ingen jurymedlemmer lagt til ennå.")
+    for navn in navn_liste_jury:
+        mine = jury[navn]["kriterier"]
+        with st.container(border=True):
+            rc1, rc2 = st.columns([4, 1])
+            with rc1:
+                st.markdown(f"**{navn}**")
+                if mine:
+                    merkelapper = "".join(
+                        f'<span class="klasse-badge" style="margin:2px 4px 2px 0;border-color:{FAGFELT_FARGE.get(fagfelt, "#888")};">{k}</span>'
+                        for fagfelt, kriterier in felt_dict.items() for k in kriterier if k in mine
+                    )
+                    st.markdown(merkelapper, unsafe_allow_html=True)
+                    st.caption(f"{len(mine)} kriterier")
+                else:
+                    st.caption("Ingen kriterier tildelt")
+            with rc2:
+                if st.button("Rediger", key=f"rediger_jury_{navn}", use_container_width=True):
+                    jury_dialog(navn)
+
+with fane_kriterier:
+    if st.button("Legg til kriterium", type="primary", icon=":material/add_circle:"):
+        kriterium_dialog()
+    st.write("")
+    for fagfelt in fagfelt_liste(alle_kriterier) or list(felt_dict.keys()):
+        farge_fagfelt = FAGFELT_FARGE.get(fagfelt, "#888")
+        st.markdown(f"<span style='color:{farge_fagfelt};font-weight:700;'>{fagfelt}</span>", unsafe_allow_html=True)
+        for k in [kk for kk in alle_kriterier if kk["fagfelt"] == fagfelt]:
+            kc1, kc2 = st.columns([5, 1])
+            status_tekst = "✅ Aktiv" if k["aktiv"] else "⏸️ Inaktiv"
+            antall_jm = antall_jury_per_kriterium.get(k["kriterium"], 0)
+            kc1.markdown(f"**{k['kriterium']}** — {k.get('kort', '')}  \n_{status_tekst} · {antall_jm} jurymedlem(mer)_")
+            if kc2.button("Rediger", key=f"rediger_krit_{k['kriterium']}", use_container_width=True):
+                kriterium_dialog(k["kriterium"])
+        st.write("")
 
 st.divider()
 st.subheader("Finale", anchor=False)

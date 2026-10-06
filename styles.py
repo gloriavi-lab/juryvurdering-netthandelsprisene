@@ -42,7 +42,9 @@ CSS = f"""
 
 /* Nok bunnmarg til at Streamlits flytende "Manage app"/profil-knapper nederst
    til høyre aldri dekker innhold. */
-.block-container {{ padding-bottom: 72px; padding-top: 1.5rem; }}
+/* Nok toppmarg til at innholdet aldri kommer under Streamlits egen
+   toppmeny (st.navigation position="top") – gjelder alle sider. */
+.block-container {{ padding-bottom: 72px; padding-top: 4rem; }}
 * {{ hyphens: none !important; -webkit-hyphens: none !important; }}
 /* VIKTIG: ingen global overflow-wrap:break-word – den tvinger brudd MIDT I
    ord når en lang sammensatt tekst ("Markedsføring/kundedialog") ikke får
