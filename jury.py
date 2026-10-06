@@ -25,7 +25,8 @@ FASER_FANE = "Faser"
 KRITERIER_HEADER = ["Fagfelt", "Kriterium", "Kort beskrivelse", "Utfyllende forklaring", "Skala 1", "Skala 3", "Skala 5", "Eksempler", "Fase", "Aktiv"]
 JURY_GRUNNKOLONNER = ["Navn", "E-post", "Farge"]
 VEILEDNING_HEADER = ["Overskrift", "Tekst"]
-FASER_HEADER = ["Nummer", "Navn", "Beskrivelse", "Aktiv"]
+FASER_HEADER = ["Fase", "Navn", "Beskrivelse", "Status", "Startdato", "Sluttdato"]
+FASE_STATUSER = ["Fullført", "Pågår", "Kommende"]
 
 # ─────────────────────────────────────────────
 # Kriterier
@@ -310,26 +311,77 @@ def read_veiledning(_sh):
 # Faser
 # ─────────────────────────────────────────────
 _FASER_SEED = [
-    [1, "Screening", "En AI-agent screener alle nominerte nettbutikker.", "Nei"],
-    [2, "Juryvurdering", "Juryen vurderer butikkene.", "Nei"],
-    [3, "Ekspertvurdering", "Jurymedlemmene vurderer kriteriene de er tildelt.", "Ja"],
-    [4, "Testhandel", "Testkjøp, kundeservice, compliance og universell utforming.", "Nei"],
-    [5, "Finale", "", "Nei"],
+    [1, "Screening", "En AI-agent screener alle nominerte nettbutikker.", "Fullført", "", ""],
+    [2, "Juryvurdering", "Juryen vurderer butikkene.", "Fullført", "", ""],
+    [3, "Ekspertvurdering", "Jurymedlemmene vurderer kriteriene de er tildelt.", "Pågår", "", ""],
+    [4, "Testhandel", "Testkjøp, kundeservice, compliance og universell utforming.", "Kommende", "", ""],
+    [5, "Finale", "De beste butikkene i hver størrelsesklasse kåres.", "Kommende", "", ""],
 ]
+
+
+def _migrer_gammelt_faser_format(ws):
+    """Tidligere versjon brukte kolonnene Nummer/.../Aktiv (ja/nei). Bygger om
+    til det nye skjemaet (Fase/.../Status/Startdato/Sluttdato) hvis det gamle
+    formatet oppdages – Beskrivelse-teksten beholdes som den er."""
+    rader = ws.get_all_values()
+    if not rader or rader[0][:4] == FASER_HEADER[:4]:
+        return  # allerede riktig format (eller tomt – sikre_fane seeder på nytt)
+    if rader[0][:2] != ["Nummer", "Navn"]:
+        return  # ukjent format – rør ikke
+    aktivt_nummer = next((int(rad[0]) for rad in rader[1:] if len(rad) >= 4 and str(rad[3]).strip().lower() == "ja"), None)
+    nye_rader = [FASER_HEADER]
+    for rad in rader[1:]:
+        if len(rad) < 4:
+            continue
+        try:
+            nummer = int(rad[0])
+        except ValueError:
+            continue
+        if aktivt_nummer is None:
+            status = "Pågår" if str(rad[3]).strip().lower() == "ja" else "Kommende"
+        else:
+            status = "Fullført" if nummer < aktivt_nummer else ("Pågår" if nummer == aktivt_nummer else "Kommende")
+        nye_rader.append([rad[0], rad[1], rad[2] if len(rad) > 2 else "", status, "", ""])
+    ws.clear()
+    ws.update(nye_rader)
 
 
 @st.cache_data(ttl=120, show_spinner=False)
 def read_faser(_sh):
     ws = hent_eller_lag_fane(_sh, FASER_FANE, FASER_HEADER)
+    _migrer_gammelt_faser_format(ws)
     if len(ws.get_all_values()) <= 1:
         ws.append_rows(_FASER_SEED)
         read_faser.clear()
-        return [{"Nummer": r[0], "Navn": r[1], "Beskrivelse": r[2], "Aktiv": r[3]} for r in _FASER_SEED]
+        return [dict(zip(FASER_HEADER, r)) for r in _FASER_SEED]
     return ws.get_all_records()
 
 
 def aktiv_fase(faser: list):
-    aktive = [f for f in faser if str(f.get("Aktiv", "")).strip().lower() == "ja"]
+    aktive = [f for f in faser if str(f.get("Status", "")).strip() == "Pågår"]
     if len(aktive) == 1:
         return aktive[0]
     return faser[0] if faser else None
+
+
+def sett_gjeldende_fase(sh, fase_nummer):
+    """Setter Status for ALLE faser ut fra gjeldende fasenummer: tidligere
+    faser blir «Fullført», den valgte blir «Pågår», senere blir «Kommende».
+    En bevisst, eksplisitt handling (trykk i Innstillinger) – ikke noe som
+    skjer stille i bakgrunnen. Kan overstyres manuelt i regnearket etterpå."""
+    ws = hent_eller_lag_fane(sh, FASER_FANE, FASER_HEADER)
+    rader = ws.get_all_values()
+    if len(rader) <= 1:
+        return
+    kol_status = FASER_HEADER.index("Status") + 1
+    oppdateringer = []
+    for i, rad in enumerate(rader[1:], start=2):
+        try:
+            nummer = int(rad[0])
+        except (ValueError, IndexError):
+            continue
+        status = "Fullført" if nummer < fase_nummer else ("Pågår" if nummer == fase_nummer else "Kommende")
+        oppdateringer.append({"range": gspread.utils.rowcol_to_a1(i, kol_status), "values": [[status]]})
+    if oppdateringer:
+        ws.batch_update(oppdateringer)
+    read_faser.clear()

@@ -7,8 +7,8 @@ import streamlit as st
 
 from components import status_prikk, topptekst
 from jury import (
-    add_criterion, aktive_kriterier, deaktiver_kriterium, fagfelt_liste, kriterier_per_fagfelt,
-    oppdater_kriterium, read_criteria, read_jury, slett_jurymedlem, write_jury,
+    add_criterion, aktive_kriterier, aktiv_fase, deaktiver_kriterium, fagfelt_liste, kriterier_per_fagfelt,
+    oppdater_kriterium, read_criteria, read_faser, read_jury, sett_gjeldende_fase, slett_jurymedlem, write_jury,
 )
 from sheets import (
     FASE1_FANE, FASE2_FANE, er_finale_last, finale_las_info, fjern_finale_las,
@@ -293,6 +293,25 @@ with fane_kriterier:
             if kc2.button("Rediger", key=f"rediger_krit_{k['kriterium']}", use_container_width=True):
                 kriterium_dialog(k["kriterium"])
         st.write("")
+
+st.divider()
+st.subheader("Fasestatus", anchor=False)
+faser = read_faser(sh)
+if faser:
+    faser_sortert = sorted(faser, key=lambda f: int(f.get("Fase", 0)))
+    gjeldende = aktiv_fase(faser)
+    navn_liste_faser = [f"{f.get('Fase')}. {f.get('Navn')}" for f in faser_sortert]
+    standard_indeks = faser_sortert.index(gjeldende) if gjeldende in faser_sortert else 0
+    fc1, fc2 = st.columns([3, 1])
+    valgt_fase_tekst = fc1.selectbox("Gjeldende fase", navn_liste_faser, index=standard_indeks)
+    if fc2.button("Sett som gjeldende", use_container_width=True):
+        valgt_nummer = int(valgt_fase_tekst.split(".")[0])
+        sett_gjeldende_fase(sh, valgt_nummer)
+        st.toast("Fasestatus oppdatert.", icon=":material/check_circle:")
+        st.rerun()
+    st.caption("Tidligere faser settes automatisk til «Fullført», senere til «Kommende». Kan overstyres manuelt i fanen «Faser» i regnearket etterpå.")
+else:
+    st.caption("Fanen «Faser» finnes ikke ennå – opprettes automatisk neste gang Oversikt-siden åpnes.")
 
 st.divider()
 st.subheader("Finale", anchor=False)

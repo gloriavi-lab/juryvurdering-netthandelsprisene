@@ -131,6 +131,33 @@ div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px;
     .kun-mobil-vis {{ display:grid; }}
     .kun-desktop-vis {{ display:none; }}
 }}
+
+/* Fasetidslinje på Oversikt – kort forbundet med en linje, farget grønn
+   frem til gjeldende fase og grå etter. */
+.fase-rad {{ display:flex; align-items:stretch; gap:0; margin: 6px 0 4px 0; }}
+.fase-kort {{ flex:1; min-width:0; background:var(--kort-bakgrunn); border:2px solid var(--kant); border-radius:14px; padding:18px 14px; text-align:center; }}
+.fase-kort.fullfort {{ border-color: rgba(30,142,90,0.45); }}
+.fase-kort.pagar {{ border-color: var(--merke); box-shadow: 0 0 0 3px rgba(0,112,60,0.12); }}
+.fase-kort.kommende {{ border-color: var(--kant); opacity: 0.55; }}
+.fase-sirkel {{ width:30px; height:30px; border-radius:50%; display:flex; align-items:center; justify-content:center; margin: 0 auto 8px auto; font-weight:800; font-size:13px; }}
+.fase-kort.fullfort .fase-sirkel {{ background: rgba(30,142,90,0.15); color: var(--gronn); }}
+.fase-kort.pagar .fase-sirkel {{ background: var(--merke); color: white; }}
+.fase-kort.kommende .fase-sirkel {{ background: var(--lys-bakgrunn); color: var(--tekst-dempet); border:1px solid var(--kant); }}
+.fase-navn {{ font-weight:700; font-size:14px; margin-bottom:4px; color:var(--tekst); }}
+.fase-kort.kommende .fase-navn {{ color: var(--tekst-dempet); }}
+.fase-badge {{ display:inline-block; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.3px; padding:2px 8px; border-radius:10px; margin-bottom:6px; }}
+.fase-badge.fullfort {{ background: rgba(30,142,90,0.14); color: var(--gronn); }}
+.fase-badge.pagar {{ background: var(--merke); color: white; }}
+.fase-badge.kommende {{ background: var(--lys-bakgrunn); color: var(--tekst-dempet); border:1px solid var(--kant); }}
+.fase-beskrivelse {{ font-size:12px; color: var(--tekst-dempet); margin-top:4px; line-height:1.4; }}
+.fase-dato {{ font-size:10.5px; color: var(--tekst-dempet); margin-top:4px; }}
+.fase-linje {{ flex:0 0 22px; align-self:center; height:3px; margin: 0 -1px; }}
+.fase-linje.gronn {{ background: var(--gronn); }}
+.fase-linje.gra {{ background: var(--kant); }}
+@media (max-width: 768px) {{
+    .fase-rad {{ flex-direction:column; gap:10px; }}
+    .fase-linje {{ display:none; }}
+}}
 </style>
 """
 

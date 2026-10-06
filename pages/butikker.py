@@ -10,7 +10,7 @@ import streamlit as st
 from components import regneark_tabell, topptekst
 from data import er_tall, snitt_av_scorer, status_for_scorer
 from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, read_criteria
-from sheets import read_ratings, read_stores
+from sheets import read_kommentarer, read_ratings, read_stores
 from theme import FAGFELT_FARGE, KLASSE_IKON, KLASSE_TONE
 
 topptekst("Butikker")
@@ -23,6 +23,7 @@ if not sh:
 try:
     butikker, _ = read_stores(sh)
     rating_data = read_ratings(sh)
+    kommentar_rader = read_kommentarer(sh)
     kriterier_fase3 = aktive_kriterier(read_criteria(sh), fase="Fase 3")
 except Exception as e:
     st.error(f"Kunne ikke lese regnearket: {e}", icon=":material/error:")
@@ -104,6 +105,11 @@ def vis_detaljpanel(navn):
         st.link_button("Besøk butikk", info["url"], icon=":material/open_in_new:")
     st.divider()
 
+    kommentarer_per_kriterium = defaultdict(list)
+    for r in kommentar_rader:
+        if r["butikk"] == navn and r["kommentar"]:
+            kommentarer_per_kriterium[r["kriterium"]].append((r["jurymedlem"], r["kommentar"]))
+
     scorer = scorer_for(navn)
     for fagfelt in FAGFELT:
         kriterier = KRITERIER_PER_FAGFELT[fagfelt]
@@ -116,17 +122,20 @@ def vis_detaljpanel(navn):
         )
         for k in kriterier:
             verdi = scorer.get(k)
+            kom_ikon = " 💬" if kommentarer_per_kriterium.get(k) else ""
             if verdi is None:
-                st.caption(f"{k}: ikke vurdert")
+                st.caption(f"{k}: ikke vurdert{kom_ikon}")
             elif er_tall(verdi):
-                st.caption(f"{k}: {'⭐' * int(verdi)}")
+                st.caption(f"{k}: {'⭐' * int(verdi)}{kom_ikon}")
             else:
-                st.caption(f"{k}: {verdi}")
+                st.caption(f"{k}: {verdi}{kom_ikon}")
+            for jurymedlem, kommentar in kommentarer_per_kriterium.get(k, []):
+                st.caption(f"　↳ _{jurymedlem}:_ {kommentar}")
 
     kommentarer = rating_data.get(navn, {}).get("kommentarer", {})
     if any(kommentarer.values()):
         st.divider()
-        st.markdown("**Kommentarer**")
+        st.markdown("**Generell kommentar per fagfelt**")
         for fagfelt, kommentar in kommentarer.items():
             if kommentar:
                 st.caption(f"_{fagfelt}:_ {kommentar}")

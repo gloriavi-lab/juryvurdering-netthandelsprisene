@@ -553,3 +553,86 @@ def test_tilkobling(sh):
             resultater.append((False, f"Fanen «{navn}» mangler ennå." + (" Opprettes automatisk når noen lagrer en vurdering/jurymedlem." if navn in (FASE2_FANE, "Jury") else "")))
 
     return resultater
+
+
+# ─────────────────────────────────────────────
+# Kommentarer – én rad per butikk+jurymedlem+kriterium. Fasiten for
+# kommentarer; notatet på selve scorecellen i Fase 2-fanen er bare en kopi
+# til rask oversikt direkte i regnearket.
+# ─────────────────────────────────────────────
+KOMMENTARER_FANE = "Kommentarer"
+KOMMENTARER_HEADER = ["Butikk", "Jurymedlem", "Fagfelt", "Kriterium", "Kommentar", "Sist endret"]
+
+
+def _sikre_kommentarer_fane(sh):
+    from theme import GRUNNKOLONNE_FARGE
+
+    try:
+        return sh.worksheet(KOMMENTARER_FANE)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=KOMMENTARER_FANE, rows=1000, cols=len(KOMMENTARER_HEADER))
+        ws.append_row(KOMMENTARER_HEADER)
+        try:
+            ws.format("A1:F1", {"backgroundColor": _hex_til_rgb(GRUNNKOLONNE_FARGE), "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+            ws.freeze(rows=1)
+        except Exception:
+            pass
+        return ws
+
+
+@st.cache_data(ttl=20, show_spinner=False)
+def read_kommentarer(_sh):
+    """Liste av dicts – én per lagret kriterium-kommentar. rad-nummeret er
+    med slik at upsert_kommentar kan oppdatere/slette presist."""
+    ws = _sikre_kommentarer_fane(_sh)
+    rader = ws.get_all_values()
+    resultat = []
+    for i, rad in enumerate(rader[1:] if len(rader) > 1 else [], start=2):
+        if len(rad) >= 4 and rad[0]:
+            resultat.append({
+                "rad": i, "butikk": rad[0], "jurymedlem": rad[1], "fagfelt": rad[2],
+                "kriterium": rad[3], "kommentar": rad[4] if len(rad) > 4 else "",
+                "sist_endret": rad[5] if len(rad) > 5 else "",
+            })
+    return resultat
+
+
+def upsert_kommentar(sh, butikk, jurymedlem, fagfelt, kriterium, kommentar):
+    """Oppretter/oppdaterer raden i Kommentarer, eller SLETTER den hvis
+    kommentarteksten er tømt. Speiler i tillegg kommentaren som notat på
+    riktig scorecelle i Fase 2-fanen (kun en bekvemmelighet for de som
+    jobber direkte i Sheets – Kommentarer-fanen er fasiten)."""
+    ws = _sikre_kommentarer_fane(sh)
+    rader = ws.get_all_values()
+    rad_nr = None
+    for i, rad in enumerate(rader[1:] if len(rader) > 1 else [], start=2):
+        if len(rad) >= 4 and rad[0] == butikk and rad[1] == jurymedlem and rad[3] == kriterium:
+            rad_nr = i
+            break
+
+    tidsstempel = datetime.now().strftime("%Y-%m-%d %H:%M")
+    kommentar = (kommentar or "").strip()
+    if kommentar:
+        verdier = [butikk, jurymedlem, fagfelt, kriterium, kommentar, tidsstempel]
+        if rad_nr:
+            ws.update([verdier], range_name=f"A{rad_nr}:F{rad_nr}")
+        else:
+            ws.append_row(verdier)
+    elif rad_nr:
+        ws.spreadsheet.batch_update({"requests": [{
+            "deleteDimension": {"range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": rad_nr - 1, "endIndex": rad_nr}}
+        }]})
+    read_kommentarer.clear()
+
+    try:
+        fase2 = _sikre_fase2_fane(sh)
+        grunn2, krit2, _ = _header_data(fase2)
+        butikker2, _ = _les_butikkliste(fase2, grunn2)
+        if butikk in butikker2 and (fagfelt, kriterium) in krit2:
+            celle = gspread.utils.rowcol_to_a1(butikker2[butikk]["rad"], krit2[(fagfelt, kriterium)])
+            if kommentar:
+                fase2.insert_note(celle, kommentar)
+            else:
+                fase2.clear_note(celle)
+    except Exception:
+        pass  # notatet er kun en bekvemmelighet – skal aldri blokkere selve lagringen

@@ -7,8 +7,9 @@ import os
 import streamlit as st
 
 from components import rutenett
-from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_faser, read_jury, read_veiledning
-from sheets import read_stores
+from data import er_tall
+from jury import aktive_kriterier, aktiv_fase, fagfelt_liste, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_faser, read_jury, read_veiledning
+from sheets import read_fase1_scores, read_ratings, read_stores
 from theme import FAGFELT_FARGE, KLASSE_IKON, KLASSE_TONE
 
 
@@ -31,8 +32,8 @@ kriterier_fase3 = aktive_kriterier(alle_kriterier, fase="Fase 3")
 FAGFELT = fagfelt_liste(kriterier_fase3)
 KRITERIER_PER_FAGFELT = kriterier_per_fagfelt(kriterier_fase3)
 kriterium_info = {k["kriterium"]: k for k in kriterier_fase3}
-gjeldende_fase = next((f for f in faser if str(f.get("Aktiv", "")).strip().lower() == "ja"), None)
-fase_tekst = f"Fase {gjeldende_fase['Nummer']} · {gjeldende_fase['Navn']}" if gjeldende_fase else "Fase 3 · Ekspertvurdering"
+gjeldende_fase = aktiv_fase(faser) if faser else None
+fase_tekst = f"Fase {gjeldende_fase['Fase']} · {gjeldende_fase['Navn']}" if gjeldende_fase else "Fase 3 · Ekspertvurdering"
 
 BANNER_HTML = (
     '<div class="banner">'
@@ -190,13 +191,57 @@ else:
 st.divider()
 st.subheader("Fasene i konkurransen", anchor=False)
 if faser:
-    faser_sortert = sorted(faser, key=lambda f: int(f.get("Nummer", 0)))
-    fase_kort = []
-    for f in faser_sortert:
-        er_aktiv = str(f.get("Aktiv", "")).strip().lower() == "ja"
-        klasse = " aktiv" if er_aktiv else ""
-        merke = ' <span class="merke-tekst">· nå</span>' if er_aktiv else ""
-        fase_kort.append(f'<div class="rutenett-kort{klasse}"><h4>{f.get("Nummer")}. {f.get("Navn")}{merke}</h4><ul><li>{f.get("Beskrivelse", "")}</li></ul></div>')
-    st.markdown(f'<div class="rutenett" style="grid-template-columns:repeat(5, minmax(0,1fr));">{"".join(fase_kort)}</div>', unsafe_allow_html=True)
+    faser_sortert = sorted(faser, key=lambda f: int(f.get("Fase", 0)))
+
+    def _fase_fremdrift(navn_fase):
+        """Henter fremdrift i prosent for faser vi faktisk har data for i
+        appen – None for faser uten datakilde (vises da uten linje)."""
+        if not sh:
+            return None
+        try:
+            if navn_fase == "Ekspertvurdering":
+                kriterier = [k["kriterium"] for k in aktive_kriterier(alle_kriterier, fase="Fase 3")]
+                rating_data = read_ratings(sh)
+                total = len(butikker) * len(kriterier)
+                fylt = sum(1 for n in butikker for k in kriterier if rating_data.get(n, {}).get("scorer", {}).get(k))
+            elif navn_fase == "Juryvurdering":
+                kriterier = [k["kriterium"] for k in aktive_kriterier(alle_kriterier, fase="Fase 2")]
+                fase1 = read_fase1_scores(sh)
+                total = len(butikker) * len(kriterier)
+                fylt = sum(1 for n in butikker for k in kriterier if fase1.get(n, {}).get(k))
+            else:
+                return None
+            return round(fylt / total * 100) if total else None
+        except Exception:
+            return None
+
+    deler = []
+    for idx, f in enumerate(faser_sortert):
+        status = str(f.get("Status", "")).strip() or "Kommende"
+        css_klasse = {"Fullført": "fullfort", "Pågår": "pagar"}.get(status, "kommende")
+        sirkel_innhold = "✓" if status == "Fullført" else str(f.get("Fase", idx + 1))
+        beskrivelse = f.get("Beskrivelse", "").strip()
+        beskrivelse_html = f'<div class="fase-beskrivelse">{beskrivelse}</div>' if beskrivelse else ""
+        dato_start, dato_slutt = f.get("Startdato", "").strip(), f.get("Sluttdato", "").strip()
+        dato_html = f'<div class="fase-dato">{dato_start}{" – " + dato_slutt if dato_slutt else ""}</div>' if (dato_start or dato_slutt) else ""
+        fremdrift_html = ""
+        if status == "Pågår":
+            prosent = _fase_fremdrift(f.get("Navn", ""))
+            if prosent is not None:
+                fremdrift_html = (
+                    f'<div class="fremdrift-bakgrunn" style="margin-top:8px;height:6px;">'
+                    f'<div class="fremdrift-fyll" style="width:{prosent}%;"></div></div>'
+                    f'<div class="fase-dato">{prosent}% vurdert</div>'
+                )
+        deler.append(
+            f'<div class="fase-kort {css_klasse}"><div class="fase-sirkel">{sirkel_innhold}</div>'
+            f'<div class="fase-badge {css_klasse}">{status}</div>'
+            f'<div class="fase-navn">{f.get("Navn", "")}</div>'
+            f'{beskrivelse_html}{dato_html}{fremdrift_html}</div>'
+        )
+        if idx < len(faser_sortert) - 1:
+            linje_farge = "gronn" if status == "Fullført" else "gra"
+            deler.append(f'<div class="fase-linje {linje_farge}"></div>')
+    st.markdown(f'<div class="fase-rad">{"".join(deler)}</div>', unsafe_allow_html=True)
 else:
     st.caption("Fasene lastes fra fanen «Faser» i regnearket.")

@@ -11,7 +11,7 @@ import streamlit as st
 from components import fremdriftslinje, klasse_badge, lagringsstatus, onboarding_steg, topptekst, tom_tilstand
 from data import IKKE_VURDERT, er_tall, snitt_av_scorer, status_for_scorer
 from jury import aktive_kriterier, beskriv_tildeling, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
-from sheets import read_ratings, read_stores, upsert_rating
+from sheets import read_kommentarer, read_ratings, read_stores, upsert_kommentar, upsert_rating
 from theme import FAGFELT_FARGE
 
 topptekst("Vurdering")
@@ -71,9 +71,19 @@ kriterium_info = {k["kriterium"]: k for k in kriterier_fase3}
 
 try:
     rating_data = read_ratings(sh)
+    kommentar_rader = read_kommentarer(sh)
 except Exception as e:
     st.error(f"Kunne ikke lese vurderinger: {e}", icon=":material/error:")
     st.stop()
+
+# Mine kriterium-kommentarer – kun egne (hver har sin egen rad i Kommentarer,
+# flere jurymedlemmer kan ha kommentert samme kriterium hvis det er delt).
+mine_kommentar_oppslag = {
+    (r["butikk"], r["kriterium"]): r["kommentar"]
+    for r in kommentar_rader if r["jurymedlem"] == jurynavn
+}
+# Til "har noen kommentert dette?"-ikon i Mine butikker/detaljpanel.
+noen_kommentar_oppslag = {(r["butikk"], r["kriterium"]) for r in kommentar_rader if r["kommentar"]}
 
 navn_liste_butikker = sorted(butikker.keys())
 
@@ -120,17 +130,29 @@ def lagre_denne(navn):
                 score = IKKE_VURDERT
             else:
                 feedback_verdi = st.session_state.get(f"score_{navn}_{krit}")
-                score = (feedback_verdi if feedback_verdi is not None else 2) + 1
+                if feedback_verdi is None:
+                    continue  # ikke klikket på ennå – skal IKKE lagres som noe, og ikke telle i snittet
+                score = feedback_verdi + 1
             vurderinger.append((krit, score))
+
+            try:
+                kommentar_krit = st.session_state.get(f"kom_krit_{navn}_{krit}", "")
+                upsert_kommentar(sh, navn, jurynavn, fagfelt, krit, kommentar_krit)
+            except Exception as e:
+                st.session_state["_lagringstilstand"] = ("feil", str(e))
+                ok = False
+
         kommentar = st.session_state.get(f"kom_{navn}_{fagfelt}", "")
-        try:
-            upsert_rating(sh, navn, jurynavn, fagfelt, vurderinger, kommentar)
-        except Exception as e:
-            st.session_state["_lagringstilstand"] = ("feil", str(e))
-            ok = False
+        if vurderinger:
+            try:
+                upsert_rating(sh, navn, jurynavn, fagfelt, vurderinger, kommentar)
+            except Exception as e:
+                st.session_state["_lagringstilstand"] = ("feil", str(e))
+                ok = False
     if ok:
         st.session_state["_lagringstilstand"] = ("lagret", datetime.now().strftime("%H:%M"))
         st.session_state["_har_ulagrede_endringer"] = False
+    read_kommentarer.clear()
     return ok
 
 
@@ -170,34 +192,53 @@ def vis_butikkort(navn):
             eksisterende_score = scorer(navn).get(krit)
             var_na = eksisterende_score == IKKE_VURDERT
             info_k = kriterium_info.get(krit, {})
+            eksisterende_kommentar_krit = mine_kommentar_oppslag.get((navn, krit), "")
 
-            kc1, kc2 = st.columns([3, 1])
-            with kc1:
-                tc1, tc2 = st.columns([5, 1])
-                tc1.markdown(f"**{krit}**" + (f" — _{info_k.get('kort', '')}_" if info_k.get("kort") else ""))
-                with tc2.popover("Les mer", icon=":material/help:", use_container_width=True):
-                    if info_k.get("utfyllende"):
-                        st.markdown(info_k["utfyllende"])
-                    st.markdown(f"**1:** {info_k.get('skala1', '–')}")
-                    st.markdown(f"**3:** {info_k.get('skala3', '–')}")
-                    st.markdown(f"**5:** {info_k.get('skala5', '–')}")
-                    if info_k.get("eksempler"):
-                        st.caption(info_k["eksempler"])
+            tc1, tc2 = st.columns([5, 1])
+            tc1.markdown(f"**{krit}**" + (f"  \n_{info_k['kort']}_" if info_k.get("kort") else ""))
+            with tc2.popover("Les mer", icon=":material/help:", use_container_width=True):
+                if info_k.get("utfyllende"):
+                    st.markdown(info_k["utfyllende"])
+                st.markdown(f"**1:** {info_k.get('skala1', '–')}")
+                st.markdown(f"**3:** {info_k.get('skala3', '–')}")
+                st.markdown(f"**5:** {info_k.get('skala5', '–')}")
+                if info_k.get("eksempler"):
+                    st.caption(info_k["eksempler"])
 
+            sc1, sc2 = st.columns([1, 2])
+            with sc1:
                 na_key = f"na_{navn}_{krit}"
                 if na_key not in st.session_state:
                     st.session_state[na_key] = var_na
-                st.checkbox("Kan ikke vurdere", key=na_key, on_change=_marker_endret)
                 score_key = f"score_{navn}_{krit}"
-                if score_key not in st.session_state:
-                    st.session_state[score_key] = (int(eksisterende_score) - 1) if er_tall(eksisterende_score) else 2
+                # VIKTIG: ingen standardverdi settes her når det ikke finnes en
+                # ekte lagret score – da vises stjernene TOMME (ikke vurdert),
+                # i stedet for forhåndsvalgt på 3 (det var buggen som er rettet).
+                if score_key not in st.session_state and er_tall(eksisterende_score):
+                    st.session_state[score_key] = int(eksisterende_score) - 1
                 if not st.session_state[na_key]:
                     st.feedback("stars", key=score_key, on_change=_marker_endret)
+                st.checkbox("Kan ikke vurdere", key=na_key, on_change=_marker_endret)
+            with sc2:
+                vis_kommentar_key = f"vis_kommentar_{navn}_{krit}"
+                if vis_kommentar_key not in st.session_state:
+                    st.session_state[vis_kommentar_key] = bool(eksisterende_kommentar_krit)
+                if not st.session_state[vis_kommentar_key]:
+                    if st.button("+ Legg til kommentar", key=f"btn_kom_{navn}_{krit}"):
+                        st.session_state[vis_kommentar_key] = True
+                        st.rerun(scope="fragment")
+                else:
+                    st.text_area(
+                        "Kommentar", value=eksisterende_kommentar_krit, key=f"kom_krit_{navn}_{krit}",
+                        label_visibility="collapsed", placeholder=f"Kommentar til «{krit}» (valgfritt)…",
+                        height=68, on_change=_marker_endret,
+                    )
             st.write("")
 
         st.text_area(
-            f"Kommentar – {fagfelt}", value=kommentar_for(navn, fagfelt), key=f"kom_{navn}_{fagfelt}",
-            placeholder="Skriv en samlet kommentar for dette fagfeltet (valgfritt)…", height=70,
+            f"Generell kommentar – {fagfelt}" if len(mine_per_felt) > 1 else "Generell kommentar",
+            value=kommentar_for(navn, fagfelt), key=f"kom_{navn}_{fagfelt}",
+            placeholder="Skriv en samlet kommentar (valgfritt)…", height=70,
             on_change=_marker_endret,
         )
 
@@ -239,7 +280,12 @@ if visning == "Mine butikker":
         if klasse_filter and info.get("klasse") not in klasse_filter:
             continue
         sn = snitt(navn)
-        rader.append({"Butikk": navn, "Klasse": info.get("klasse", "–"), "Bransje": info.get("bransje", "–"), "Status": s, "Mitt snitt": f"{sn:.2f}" if sn is not None else "–"})
+        har_kommentar = any((navn, k) in noen_kommentar_oppslag for k in mine_kriterier_flat)
+        rader.append({
+            "Butikk": navn, "Klasse": info.get("klasse", "–"), "Bransje": info.get("bransje", "–"),
+            "Status": s, "Mitt snitt": f"{sn:.2f}" if sn is not None else "–",
+            "💬": "💬" if har_kommentar else "",
+        })
         navn_for_rad.append(navn)
 
     rekkefolge_vekt = {"Ikke startet": 0, "Påbegynt": 1, "Ferdig": 2}
