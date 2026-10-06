@@ -221,10 +221,16 @@ def write_jury(sh, navn, kriterier_valgt: set, epost="", farge=""):
     if navn in jury:
         rad_nr = jury[navn]["rad"]
     else:
-        rad_nr = len(ws.get_all_values()) + 1
-        # Raden trenger ikke et eget forhåndsskriv – arket har allerede 200
-        # rader allokert (se _bygg_gruppert_header), og batch_update under
-        # skriver hele raden i ett kall.
+        # IKKE len(ws.get_all_values())+1 – get_all_values() er PADDET til
+        # arkets fulle rutenett (200 rader) uansett hvor mye som faktisk er
+        # fylt ut, så det ga alltid rad 201 og en "exceeds grid limits"-feil
+        # for enhver ny person. Finn i stedet den første virkelig TOMME
+        # raden, basert på siste faktisk brukte rad blant eksisterende
+        # jurymedlemmer.
+        siste_brukte_rad = max((p["rad"] for p in jury.values()), default=FORSTE_DATARAD - 1)
+        rad_nr = siste_brukte_rad + 1
+        if rad_nr > ws.row_count:
+            ws.add_rows(rad_nr - ws.row_count + 20)  # litt buffer for neste par personer også
 
     oppdateringer = []
     for kolonnenavn, verdi in [("Navn", navn), ("E-post", epost), ("Farge", farge)]:
