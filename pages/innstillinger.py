@@ -8,10 +8,11 @@ import streamlit as st
 from components import status_prikk, topptekst
 from jury import (
     add_criterion, aktive_kriterier, aktiv_fase, deaktiver_kriterium, fagfelt_liste, kriterier_per_fagfelt,
-    oppdater_kriterium, read_criteria, read_faser, read_jury, sett_gjeldende_fase, slett_jurymedlem, write_jury,
+    mine_kriterier, oppdater_kriterium, read_criteria, read_faser, read_jury, sett_gjeldende_fase, slett_jurymedlem,
+    write_jury,
 )
 from sheets import (
-    FASE1_FANE, FASE2_FANE, er_finale_last, finale_las_info, fjern_finale_las,
+    FASE1_FANE, FASE2_FANE, er_finale_last, feilsok_vurdering, finale_las_info, fjern_finale_las,
     legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, migrer_til_vurderinger_fane, read_fase1_scores,
     read_ratings, read_stores, read_vurderinger, sikkerhetskopier_alle_faner, test_tilkobling, VURDERINGER_FANE,
 )
@@ -124,20 +125,27 @@ if st.session_state.get("_migrering_resultat"):
     st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
 
 st.divider()
-st.subheader("Ekspertvurdering – vurderingsark", anchor=False)
-st.caption(
-    f"«{FASE2_FANE}» opprettes automatisk (som en nøyaktig kopi av «{FASE1_FANE}» – samme farger, "
-    "sammenslåinger, nedtrekkslister og filter) første gang noen lagrer en vurdering, eller når du trykker knappen under."
-)
-try:
-    sh.worksheet(FASE2_FANE)
-    st.success(f"«{FASE2_FANE}» finnes allerede.", icon=":material/check_circle:")
-except Exception:
-    if st.button("Opprett «Rangering fase 2» nå", icon=":material/content_copy:"):
-        read_ratings(sh)  # trigger _sikre_fase2_fane
-        st.rerun()
+with st.expander(f"Eldre, forlatt fane: «{FASE2_FANE}» (ikke i bruk lenger)", icon=":material/history:"):
+    st.warning(
+        f"Appen leser og skriver ALDRI til «{FASE2_FANE}» lenger – «{VURDERINGER_FANE}» (over) er eneste "
+        "kilde til sannhet i dagens modell. Denne seksjonen er kun her for den som fortsatt har det gamle "
+        "regnearket oppe og lurer på hva knappene under gjorde i den tidligere arkitekturen. Data som "
+        f"står i «{FASE2_FANE}» i dag kan være ELDRE enn det jury faktisk har lagret i appen – se "
+        "«Feilsøking lagring» lenger ned for å slå opp hva som faktisk er lagret for en gitt butikk.",
+        icon=":material/warning:",
+    )
+    st.caption(
+        f"«{FASE2_FANE}» opprettes automatisk (som en nøyaktig kopi av «{FASE1_FANE}» – samme farger, "
+        "sammenslåinger, nedtrekkslister og filter) første gang noen lagrer en vurdering, eller når du trykker knappen under."
+    )
+    try:
+        sh.worksheet(FASE2_FANE)
+        st.success(f"«{FASE2_FANE}» finnes allerede.", icon=":material/check_circle:")
+    except Exception:
+        if st.button("Opprett «Rangering fase 2» nå", icon=":material/content_copy:"):
+            read_ratings(sh)  # trigger _sikre_fase2_fane
+            st.rerun()
 
-with st.expander("Tillat «Kan ikke vurdere» i nedtrekkslisten", icon=":material/lock_open:"):
     st.caption(
         "Legger «Kan ikke vurdere» til som en ekstra gyldig verdi i kriteriecellenes nedtrekksliste på "
         f"«{FASE2_FANE}» (i tillegg til 1–5). Endrer kun datavalideringen, ingen annen formatering."
@@ -155,6 +163,40 @@ felt_dict = kriterier_per_fagfelt(kriterier_fase3)
 jury = read_jury(sh)
 navn_liste_jury = sorted(jury.keys())
 antall_jury_per_kriterium = {k: sum(1 for p in jury.values() if any(kr == k for kr in p["kriterier"])) for liste in felt_dict.values() for k in liste}
+
+st.divider()
+st.subheader("Feilsøking lagring", anchor=False)
+st.caption(
+    f"Slår opp nøyaktig det appen leser fra «{VURDERINGER_FANE}»-fanen for ÉN butikk + ETT jurymedlem – "
+    "rå verdi fra arket (med type), normalisert verdi, og hva skjemaet faktisk ville vist. Leser alltid "
+    "ferskt (hopper forbi mellomlagringen), så dette viser nøyaktig det som står i arket akkurat nå."
+)
+fdc1, fdc2 = st.columns(2)
+feilsok_jurymedlem = fdc1.selectbox("Jurymedlem", navn_liste_jury, key="_feilsok_jurymedlem") if navn_liste_jury else None
+feilsok_butikk = fdc2.selectbox("Butikk", sorted(butikker.keys()), key="_feilsok_butikk") if butikker else None
+
+if feilsok_jurymedlem and feilsok_butikk:
+    mine_krit = sorted(mine_kriterier(jury, feilsok_jurymedlem))
+    if not mine_krit:
+        st.info(f"{feilsok_jurymedlem} har ingen kriterier tildelt.", icon=":material/info:")
+    else:
+        rader_feilsok = feilsok_vurdering(sh, feilsok_butikk, feilsok_jurymedlem, mine_krit)
+        st.dataframe(
+            [
+                {
+                    "Kriterium": r["kriterium"], "Fane": r["fane"], "Celle": r["celle"],
+                    "Rå verdi": r["rå_score"], "Type": r["rå_score_type"],
+                    "Normalisert": r["normalisert_score"], "Kommentar (rå)": r["rå_kommentar"],
+                    "Ville vist i skjema": (
+                        "– (ikke besvart)" if r["normalisert_score"] is None
+                        else ("Kan ikke vurdere" if r["normalisert_score"] == "Kan ikke vurdere" else f"{r['normalisert_score']} markert")
+                    ),
+                }
+                for r in rader_feilsok
+            ],
+            hide_index=True, use_container_width=True,
+        )
+        st.caption("«Rå verdi»/«Type» er nøyaktig det `get_all_values()` returnerte fra Google Sheets, før noe i appen har tolket det.")
 
 
 def _sheets_feilboks(e, handling="lagre"):

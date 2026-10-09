@@ -142,12 +142,33 @@ def les_fase1_liste(opplastet_fil):
 # ─────────────────────────────────────────────
 # Beregning – fullføringsstatus og snitt, med støtte for "Kan ikke vurdere"
 # ─────────────────────────────────────────────
-def er_tall(score) -> bool:
+def normalize_score(verdi):
+    """Gjør en score-verdi LEST FRA REGNEARKET (gspread kan gi str, int,
+    float, med norsk komma-desimal, mellomrom, tomt, eller selve
+    IKKE_VURDERT-teksten, avhengig av hvordan cellen ble formatert/skrevet)
+    om til ÉN kanonisk form: et int 1-5, strengen IKKE_VURDERT, eller None
+    ("ikke besvart"). Brukes OVERALT der en lagret score leses – seeding av
+    st.segmented_control, status/snitt-beregning og lagre_denne()s
+    påkrevd-kommentar-sjekk – slik at de aldri kan komme i utakt med
+    hverandre om Sheets en dag returnerer et format vi ikke testet for."""
+    if verdi is None:
+        return None
+    if isinstance(verdi, str):
+        verdi = verdi.strip()
+        if not verdi:
+            return None
+        if verdi == IKKE_VURDERT:
+            return IKKE_VURDERT
+        verdi = verdi.replace(",", ".")
     try:
-        float(score)
-        return True
+        tall = float(verdi)
     except (ValueError, TypeError):
-        return False
+        return None
+    return int(tall) if tall.is_integer() else tall
+
+
+def er_tall(score) -> bool:
+    return isinstance(normalize_score(score), (int, float))
 
 
 def status_for_scorer(scorer: dict, kriterier: list) -> str:
@@ -164,7 +185,7 @@ def status_for_scorer(scorer: dict, kriterier: list) -> str:
 def snitt_av_scorer(scorer: dict, kriterier: list):
     """Snitt av tallscorer blant kriteriene (N/A/«Kan ikke vurdere» telles
     ikke med). Returnerer None hvis ingen tallscorer er gitt ennå."""
-    tall = [float(scorer[k]) for k in kriterier if k in scorer and er_tall(scorer[k])]
+    tall = [normalize_score(scorer[k]) for k in kriterier if k in scorer and er_tall(scorer[k])]
     return (sum(tall) / len(tall)) if tall else None
 
 
@@ -196,5 +217,5 @@ def snitt_delt_kriterium(gruppert: dict, butikk: str, kriterium: str):
     butikken (N/A telles ikke med) – den offisielle kriterie-scoren når
     flere deler kriteriet."""
     oppforinger = gruppert.get((butikk, kriterium), [])
-    tall = [float(s) for _, s, _, _ in oppforinger if er_tall(s)]
+    tall = [normalize_score(s) for _, s, _, _ in oppforinger if er_tall(s)]
     return (sum(tall) / len(tall)) if tall else None

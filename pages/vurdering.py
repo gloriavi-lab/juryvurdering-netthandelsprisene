@@ -15,7 +15,7 @@ from datetime import datetime
 import streamlit as st
 
 from components import fremdriftslinje, klasse_badge, lagringsstatus, status_merkelapp_html, topptekst, tom_tilstand
-from data import IKKE_VURDERT, er_tall, grupper_vurderinger, mine_scorer, snitt_delt_kriterium, status_for_scorer
+from data import IKKE_VURDERT, grupper_vurderinger, mine_scorer, normalize_score, snitt_delt_kriterium, status_for_scorer
 from jury import aktive_kriterier, beskriv_tildeling, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
 from sheets import read_generelle_kommentarer, read_stores, read_vurderinger, upsert_generell_kommentar, upsert_vurdering
 from theme import FAGFELT_FARGE, STATUS_FARGE, STATUS_TEKST, STATUS_TONE
@@ -184,7 +184,8 @@ def lagre_denne(navn):
             else:
                 continue  # ikke besvart ennå – hopp over, lagre ikke noe
 
-            if er_tall(score) and int(score) <= 3 and not kommentar_krit:
+            normalisert = normalize_score(score)
+            if isinstance(normalisert, (int, float)) and normalisert <= 3 and not kommentar_krit:
                 manglende_kommentar.append(krit)
                 continue
 
@@ -236,7 +237,7 @@ def vis_vurderingsvisning():
 
     if st.button("← Alle mine butikker", icon=":material/arrow_back:"):
         st.session_state["_apnet_butikk"] = None
-        st.rerun(scope="fragment")
+        st.rerun()
         return
 
     hc1, hc2 = st.columns([3, 1])
@@ -257,7 +258,7 @@ def vis_vurderingsvisning():
     if hopp_til != navn:
         lagre_denne(navn)
         _bytt_til(hopp_til)
-        st.rerun(scope="fragment")
+        st.rerun()
 
     st.write("")
     for fagfelt, kriterier in mine_per_felt.items():
@@ -265,8 +266,7 @@ def vis_vurderingsvisning():
         st.markdown(f'<div style="border-left:4px solid {farge};padding-left:10px;margin:14px 0 10px 0;font-weight:700;">{fagfelt}</div>', unsafe_allow_html=True)
         for krit in kriterier:
             eksisterende = mine_oppslag.get((navn, krit), {})
-            eksisterende_score = eksisterende.get("score")
-            var_na = eksisterende_score == IKKE_VURDERT
+            eksisterende_score = normalize_score(eksisterende.get("score"))
             info_k = kriterium_info.get(krit, {})
 
             st.markdown(f"**{krit}**" + (f"  \n_{info_k['kort']}_" if info_k.get("kort") else ""))
@@ -281,13 +281,13 @@ def vis_vurderingsvisning():
 
             seg_key = f"seg_{navn}_{krit}"
             if seg_key not in st.session_state:
-                st.session_state[seg_key] = "Kan ikke vurdere" if var_na else (int(eksisterende_score) if er_tall(eksisterende_score) else None)
+                st.session_state[seg_key] = eksisterende_score if isinstance(eksisterende_score, (int, str)) else None
             valg = st.segmented_control("Score", [1, 2, 3, 4, 5, "Kan ikke vurdere"], key=seg_key, label_visibility="collapsed")
 
             kom_key = f"kom_krit_{navn}_{krit}"
-            pakrevd = isinstance(valg, int) and valg <= 3
+            pakrevd = isinstance(valg, (int, float)) and valg <= 3
             st.text_area(
-                "Kommentar" + (" (påkrevd)" if pakrevd else " (valgfritt)"), value=eksisterende.get("kommentar", ""),
+                "Kommentar" + (" (påkrevd ved 1–3)" if pakrevd else " (valgfritt)"), value=eksisterende.get("kommentar", ""),
                 key=kom_key, placeholder=f"Kommentar til «{krit}»" + (" – påkrevd ved lav score" if pakrevd else "…"),
                 height=68,
             )
@@ -311,18 +311,24 @@ def vis_vurderingsvisning():
     if tilstand:
         lagringsstatus(tilstand[0], tilstand[1])
 
+    # NB: disse rerunner HELE siden (ikke scope="fragment"), bevisst – de
+    # følger alltid etter en lagre_denne()-skriving. alle_vurderinger/
+    # mine_oppslag/statuskortene øverst beregnes KUN i toppen av scriptet,
+    # UTENFOR dette fragmentet, så en fragment-rerun ville aldri sett det
+    # som nettopp ble lagret (det var den reelle årsaken til at en butikk
+    # kunne vise "ingen score markert" rett etter lagring – scriptet hadde
+    # bare ikke kjørt på nytt ennå og viste fortsatt den gamle, før-lagring
+    # dataen, se bruker-rapportert feil).
     a1, a2 = st.columns(2)
     if a1.button("← Forrige", disabled=(i == 0), use_container_width=True):
         lagre_denne(navn)
         _bytt_til(navn_liste_butikker[max(0, i - 1)])
-        st.rerun(scope="fragment")
+        st.rerun()
     if a2.button("💾 Lagre og neste", type="primary", use_container_width=True):
         if lagre_denne(navn):
             st.toast("Lagret ✓", icon=":material/check_circle:")
             _bytt_til(neste_uferdige(navn) or navn)
-            st.rerun(scope="fragment")
-        else:
-            st.rerun(scope="fragment")
+        st.rerun()
 
 
 FANE_STATUS = {"gjenstar": "Ikke startet", "pabegynt": "Påbegynt", "ferdig": "Ferdig", "alle": None}

@@ -1,21 +1,33 @@
-"""All lesing/skriving mot Google Sheets. Regnearket er fasiten – appen
-ENDRER ALDRI strukturen i det (ingen ekstra faner/kolonner), kun verdiene i
-kriteriecellene, og KUN via (butikknavn, kriterienavn) → cellereferanse slått
-opp fra de faktiske overskriftene. Aldri faste kolonnebokstaver, aldri
-radnummer.
+"""All lesing/skriving mot Google Sheets.
 
-Regnearket har to ark med IDENTISK oppsett (rad 1 = fagfelt-gruppeoverskrift,
-rad 2 = kriterienavn, rad 3+ = én rad per butikk, kolonne A-E er
-Butikk/Jurymedlem/Klasse/Bransje/URL, siste kolonne er "Snitt totalt"):
-- "Rangering fase 1" – kun lest, ALDRI skrevet til av appen.
-- "Rangering fase 2" – der jurys Fase 2-vurderinger lagres. Opprettes ved å
-  DUPLISERE Fase 1-fanen (gspread duplicate_sheet) hvis den ikke finnes, slik
-  at farger, sammenslåinger, nedtrekkslister og filter følger med automatisk
-  – appen bygger ALDRI strukturen selv.
+VIKTIG – hvilken fane er hvilken (spør ikke, les her først – dette har vært
+kilde til forvirring i brukertesting):
 
-"Jurymedlem"-kolonnen brukes ikke i Fase 2 (hver ekspert dekker ett fast
-fagfelt for ALLE butikker, ikke én butikk hver) – fagfelt→ekspert-listen
-ligger i data.py, ikke i arket, etter avtale med bruker.
+- "Vurderinger" (VURDERINGER_FANE) er ENESTE sted appen skriver og leser
+  jurys score+kommentar fra, i dagens modell (én rad per butikk + jurymedlem
+  + kriterium – se read_vurderinger/upsert_vurdering lenger ned). Dette er
+  fasiten for alt som vises i pages/vurdering.py.
+- "Generelle kommentarer" (GENERELLE_KOMMENTARER_FANE) er tilsvarende eneste
+  sted for butikk-nivå-kommentarer (flere jurymedlemmer kan ha hver sin).
+- FASE1_FANE ("Rangering juryvurdering") leses KUN for butikklistens
+  grunndata (Butikk/Klasse/Bransje/URL via read_stores) – aldri skrevet til,
+  og inneholder ingen jury-scorer i dagens modell.
+- FASE2_FANE ("Rangering ekspertvurdering") er en ELDRE, FORLATT fane fra
+  FØR "Vurderinger"-modellen fantes (den gamle modellen brukte ett stort
+  rutenett + celle-notater, se migrer_til_vurderinger_fane() lenger ned som
+  kopierte gammelt innhold derfra OVER i "Vurderinger"). Den fjernes ikke
+  automatisk av koden, men appen leser/skriver ALDRI til den lenger – data
+  som står der er historisk og kan være eldre enn det som faktisk vises i
+  appen i dag. Dens "Jurymedlem"-kolonne er tom fordi DEN modellen aldri
+  brukte den (hver ekspert dekket ett fast fagfelt for alle butikker, ikke
+  én-butikk-om-gangen som i dagens modell) – det er forventet, ikke en feil.
+  En eventuell "Rangering fase 2"-fane er bare det gamle NAVNET på akkurat
+  denne samme fanen (se _GAMLE_NAVN under) – ikke en tredje, egen datakilde.
+
+Regnearket er ellers fasiten for struktur – appen bygger ALDRI nye
+faner/kolonner utover det som er eksplisitt dokumentert her, og finner alltid
+cellene sine via de faktiske overskriftene (aldri faste kolonnebokstaver,
+aldri radnummer) når den skriver til en eksisterende fane.
 """
 
 import re
@@ -690,17 +702,24 @@ def read_vurderinger(_sh):
     return resultat
 
 
+def _finn_vurdering_rad(rader, butikk, jurymedlem, kriterium):
+    """Felles oppslags-logikk for upsert_vurdering OG feilsøkingsvisningen i
+    Innstillinger, slik at de aldri kan vise/skrive til ulike rader for
+    «samme» celle. rader er resultatet av ws.get_all_values() på
+    Vurderinger-fanen. Returnerer (rad_nr, rad_verdier) eller (None, None)."""
+    for i, rad in enumerate(rader[1:] if len(rader) > 1 else [], start=2):
+        if len(rad) >= 4 and rad[0] == butikk and rad[1] == jurymedlem and rad[3] == kriterium:
+            return i, rad
+    return None, None
+
+
 def upsert_vurdering(sh, butikk, jurymedlem, fagfelt, kriterium, score, kommentar=""):
     """Oppretter/oppdaterer raden for akkurat denne (butikk, jurymedlem,
     kriterium)-kombinasjonen. score=None/tom SLETTER raden (tilsvarer «ikke
     vurdert» – skal ikke stå igjen som noe i det hele tatt)."""
     ws = _sikre_enkel_fane_med_header(sh, VURDERINGER_FANE, VURDERINGER_HEADER2)
     rader = ws.get_all_values()
-    rad_nr = None
-    for i, rad in enumerate(rader[1:] if len(rader) > 1 else [], start=2):
-        if len(rad) >= 4 and rad[0] == butikk and rad[1] == jurymedlem and rad[3] == kriterium:
-            rad_nr = i
-            break
+    rad_nr, _ = _finn_vurdering_rad(rader, butikk, jurymedlem, kriterium)
 
     tidsstempel = datetime.now().strftime("%Y-%m-%d %H:%M")
     if score:
@@ -714,6 +733,36 @@ def upsert_vurdering(sh, butikk, jurymedlem, fagfelt, kriterium, score, kommenta
             "deleteDimension": {"range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": rad_nr - 1, "endIndex": rad_nr}}
         }]})
     read_vurderinger.clear()
+
+
+def feilsok_vurdering(sh, butikk, jurymedlem, kriterier: list):
+    """For «Feilsøking lagring» i Innstillinger: EKSAKT samme
+    oppslagslogikk (_finn_vurdering_rad) som upsert_vurdering selv bruker,
+    pluss normalize_score, slik at visningen her garantert stemmer overens
+    med det appen faktisk gjør – ikke en forenklet kopi som kan drifte fra
+    virkeligheten. Gjør ALLTID en fersk lesing (hopper forbi 15s-cachen),
+    siden hele poenget er å se det som faktisk står i arket akkurat nå."""
+    from data import normalize_score
+
+    read_vurderinger.clear()
+    ws = _sikre_enkel_fane_med_header(sh, VURDERINGER_FANE, VURDERINGER_HEADER2)
+    rader = ws.get_all_values()
+    resultat = []
+    for krit in kriterier:
+        rad_nr, rad = _finn_vurdering_rad(rader, butikk, jurymedlem, krit)
+        rå_score = rad[4] if rad and len(rad) > 4 else None
+        rå_kommentar = rad[5] if rad and len(rad) > 5 else ""
+        resultat.append({
+            "kriterium": krit,
+            "fane": VURDERINGER_FANE,
+            "celle": f"E{rad_nr}" if rad_nr else "(ingen rad ennå)",
+            "rad_nr": rad_nr,
+            "rå_score": rå_score,
+            "rå_score_type": type(rå_score).__name__,
+            "rå_kommentar": rå_kommentar,
+            "normalisert_score": normalize_score(rå_score),
+        })
+    return resultat
 
 
 @st.cache_data(ttl=15, show_spinner=False)
