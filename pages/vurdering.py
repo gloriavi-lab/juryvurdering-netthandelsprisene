@@ -17,7 +17,7 @@ import streamlit as st
 from components import fremdriftslinje, klasse_badge, lagringsstatus, status_merkelapp_html, topptekst, tom_tilstand
 from data import IKKE_VURDERT, grupper_vurderinger, mine_scorer, normalize_score, snitt_delt_kriterium, status_for_scorer
 from jury import aktive_kriterier, beskriv_tildeling, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
-from sheets import read_generelle_kommentarer, read_stores, read_vurderinger, upsert_generell_kommentar, upsert_vurdering
+from sheets import feilsok_vurdering, read_generelle_kommentarer, read_stores, read_vurderinger, upsert_generell_kommentar, upsert_vurdering
 from theme import FAGFELT_FARGE, STATUS_FARGE, STATUS_TEKST, STATUS_TONE
 
 topptekst("Vurdering")
@@ -170,8 +170,15 @@ if not st.session_state.get("_apnet_butikk"):
 
 
 def lagre_denne(navn):
-    ok = True
+    """Skriver, og – VIKTIG – leser så de akkurat skrevne cellene TILBAKE fra
+    regnearket og sammenligner før "Lagret" vises. En bruker oppdaget at
+    appen kunne vise "Lagret" selv om INGENTING faktisk sto i arket (fordi
+    appen var koblet til et annet regneark enn forventet) – en try/except
+    rundt selve skrive-kallet fanger ikke det, siden selve API-kallet kan gå
+    helt fint mot FEIL regneark/fane. Derfor: ingen "Lagret" uten en fersk,
+    bekreftet lesing som faktisk stemmer."""
     manglende_kommentar = []
+    skrevet = {}  # kriterium -> (score vi forsøkte å lagre, kommentar vi forsøkte å lagre)
     for fagfelt, kriterier in mine_per_felt.items():
         for krit in kriterier:
             valg = st.session_state.get(f"seg_{navn}_{krit}")
@@ -191,9 +198,10 @@ def lagre_denne(navn):
 
             try:
                 upsert_vurdering(sh, navn, jurynavn, fagfelt, krit, score, kommentar_krit)
+                skrevet[krit] = (score, kommentar_krit)
             except Exception as e:
-                st.session_state["_lagringstilstand"] = ("feil", str(e))
-                ok = False
+                st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke skrive «{krit}»: {e}")
+                return False
 
     if manglende_kommentar:
         st.session_state["_lagringstilstand"] = ("feil", "Kommentar er påkrevd ved score 1–3: " + ", ".join(manglende_kommentar))
@@ -203,12 +211,38 @@ def lagre_denne(navn):
     try:
         upsert_generell_kommentar(sh, navn, jurynavn, generell_tekst)
     except Exception as e:
-        st.session_state["_lagringstilstand"] = ("feil", str(e))
-        ok = False
+        st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke skrive generell kommentar: {e}")
+        return False
 
-    if ok:
-        st.session_state["_lagringstilstand"] = ("lagret", datetime.now().strftime("%H:%M"))
-    return ok
+    avvik = []
+    if skrevet:
+        try:
+            kontroll = feilsok_vurdering(sh, navn, jurynavn, list(skrevet.keys()))
+        except Exception as e:
+            st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke lese tilbake etter lagring: {e}")
+            return False
+        for rad in kontroll:
+            forventet_score, forventet_kommentar = skrevet[rad["kriterium"]]
+            if rad["normalisert_score"] != normalize_score(forventet_score):
+                avvik.append(f"«{rad['kriterium']}»: skrev {forventet_score!r}, fant {rad['rå_score']!r} i {rad['fane']} {rad['celle']}")
+            elif (rad["rå_kommentar"] or "") != (forventet_kommentar or ""):
+                avvik.append(f"«{rad['kriterium']}»: kommentaren stemmer ikke med det som ble lagret")
+
+    try:
+        kontroll_generelle = read_generelle_kommentarer(sh)
+    except Exception as e:
+        st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke lese tilbake generell kommentar: {e}")
+        return False
+    lagret_generell = next((g["kommentar"] for g in kontroll_generelle if g["butikk"] == navn and g["jurymedlem"] == jurynavn), "")
+    if (lagret_generell or "") != (generell_tekst or ""):
+        avvik.append("Generell kommentar ble ikke lagret riktig")
+
+    if avvik:
+        st.session_state["_lagringstilstand"] = ("feil", "Lagringen kunne IKKE bekreftes i regnearket: " + "; ".join(avvik))
+        return False
+
+    st.session_state["_lagringstilstand"] = ("lagret", datetime.now().strftime("%H:%M"))
+    return True
 
 
 def neste_uferdige(gjeldende):

@@ -23,9 +23,27 @@ st.info("**Kun for administrator** – jurymedlemmer trenger ikke bruke denne si
 
 sh = st.session_state.get("_sh")
 
+# Brukeren har eksplisitt bekreftet at DETTE er regnearket appen skal snakke
+# med (Netthandelsprisene_Fase 1) – kun brukt til sammenligning/varsel her,
+# ALDRI til selve tilkoblingen (den styres fortsatt utelukkende av
+# secrets["google_sheets"]["sheet_id"], se sheets.koble_sheets()).
+FORVENTET_SHEET_ID = "18fvqNKEh7dFfA9S63uxkBOpigR8vzD31wrAq49yqOIQ"
+
 st.subheader("Google Sheets", anchor=False)
 status_prikk(sh is not None)
 if sh:
+    if sh.id == FORVENTET_SHEET_ID:
+        st.success(f"Tilkoblet regneark: **{sh.title}** (ID `{sh.id}`) – stemmer med forventet ark.", icon=":material/check_circle:")
+    else:
+        st.error(
+            f"Tilkoblet regneark: **{sh.title}** (ID `{sh.id}`) – **stemmer IKKE** med arket du har bekreftet "
+            f"(«Netthandelsprisene_Fase 1», ID `{FORVENTET_SHEET_ID}`). Alt appen leser og skriver går til "
+            "ARKET OVER, ikke til det du har åpent i nettleseren. Rett opp `sheet_id` under "
+            "`[google_sheets]` i appens Secrets på Streamlit Cloud (Manage app → Settings → Secrets), "
+            "og sørg for at tjenestekontoen (e-posten i `gcp_service_account`) har redigeringstilgang til "
+            f"ID `{FORVENTET_SHEET_ID}` før du lagrer secrets på nytt.",
+            icon=":material/dangerous:",
+        )
     bc1, bc2, bc3 = st.columns(3)
     bc1.link_button("Åpne regnearket", sh.url, icon=":material/open_in_new:", use_container_width=True)
     if bc2.button("Hent siste fra regnearket", icon=":material/refresh:", use_container_width=True, help="Tømmer mellomlagringen – nyttig rett etter du har redigert noe manuelt i Sheets."):
@@ -166,6 +184,7 @@ antall_jury_per_kriterium = {k: sum(1 for p in jury.values() if any(kr == k for 
 
 st.divider()
 st.subheader("Feilsøking lagring", anchor=False)
+st.markdown(f"Tilkoblet regneark akkurat nå: **{sh.title}** (ID `{sh.id}`)")
 st.caption(
     f"Slår opp nøyaktig det appen leser fra «{VURDERINGER_FANE}»-fanen for ÉN butikk + ETT jurymedlem – "
     "rå verdi fra arket (med type), normalisert verdi, og hva skjemaet faktisk ville vist. Leser alltid "

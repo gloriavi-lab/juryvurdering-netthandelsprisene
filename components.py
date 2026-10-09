@@ -18,7 +18,17 @@ def topptekst(sidetittel: str):
     fagfelt = st.session_state.get("_fagfelt")
 
     prikk_klasse = "ok" if sh else "feil"
-    prikk_tekst = "Tilkoblet" if sh else "Ikke tilkoblet"
+    # Viser HVILKET regneark appen faktisk er koblet til (tittel, med full ID
+    # som tooltip) – ikke bare «Tilkoblet». Lett å sammenligne mot fanen du
+    # faktisk har åpen i nettleseren, uten å måtte inn i Innstillinger for å
+    # oppdage at appen snakker med et ANNET regneark enn du tror.
+    if sh:
+        try:
+            prikk_tekst = f'Tilkoblet · <span title="ID: {sh.id}">{sh.title}</span>'
+        except Exception:
+            prikk_tekst = "Tilkoblet"
+    else:
+        prikk_tekst = "Ikke tilkoblet"
     jury_html = f'<span class="jurymedlem-brikke">👤 {jurynavn}{" · " + fagfelt if fagfelt else ""}</span>' if jurynavn else ""
 
     st.markdown(
