@@ -126,7 +126,9 @@ def regneark_tabell(butikker: dict, ratings: dict, kriterier_per_fagfelt: dict, 
                 rad[felt] = verdi
                 if er_tall(verdi):
                     alle_tall.append(float(verdi))
-        rad["Snitt"] = round(sum(alle_tall) / len(alle_tall), 2) if alle_tall else None
+        # ALDRI None her – pandas gjør det om til NaN, som ikke er gyldig JSON
+        # og feilte stille i AgGrid-komponenten som "Component Error" i nettleseren.
+        rad["Snitt"] = round(sum(alle_tall) / len(alle_tall), 2) if alle_tall else "–"
         rader.append(rad)
     df = pd.DataFrame(rader)
 

@@ -1,17 +1,23 @@
-"""Side 2 – Vurdering: kjerneopplevelsen. Hvert jurymedlem er nå tildelt
-FRIE KRITERIER (ikke et helt fagfelt) via Jury-fanen – se jury.py. Navn
-velges med en vanlig st.selectbox bundet direkte til session_state via
-key=, bevisst IKKE en egen skjult/kollapset tilstand slik forrige versjon
-hadde – det var roten til at navn/fagfelt ikke kunne endres."""
+"""Side 2 – Vurdering. Butikkliste er standardvisningen; klikk en butikk for
+å vurdere den. Lagrer til den nye "Vurderinger"-fanen (én rad per butikk +
+jurymedlem + kriterium – se sheets.py). Tall 1–5 i stedet for stjerner,
+kommentar per kriterium (påkrevd ved 1–3), ingen fagfelt-nivå-kommentar.
+
+VIKTIG tilstandshåndtering: nøklene for score/kommentar-widgetene nullstilles
+EKSPLISITT når brukeren bytter til en ANNEN butikk (sammenlignet med forrige
+rad i session_state), slik at visningen alltid viser det som faktisk er
+lagret – ikke en tilfeldig gammel verdi fra en tidligere visning i samme
+nettleserøkt. Det var roten til at en slettet kommentar kunne "komme
+tilbake" og at en score kunne se ut til å forsvinne."""
 
 from datetime import datetime
 
 import streamlit as st
 
-from components import fremdriftslinje, klasse_badge, lagringsstatus, onboarding_steg, topptekst, tom_tilstand
-from data import IKKE_VURDERT, er_tall, snitt_av_scorer, status_for_scorer
+from components import fremdriftslinje, klasse_badge, lagringsstatus, topptekst, tom_tilstand
+from data import IKKE_VURDERT, er_tall, grupper_vurderinger, mine_scorer, snitt_delt_kriterium, status_for_scorer
 from jury import aktive_kriterier, beskriv_tildeling, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
-from sheets import read_kommentarer, read_ratings, read_stores, upsert_kommentar, upsert_rating
+from sheets import read_generelle_kommentarer, read_stores, read_vurderinger, upsert_generell_kommentar, upsert_vurdering
 from theme import FAGFELT_FARGE
 
 topptekst("Vurdering")
@@ -31,128 +37,134 @@ except Exception as e:
 
 kriterier_fase3 = aktive_kriterier(alle_kriterier, fase="Fase 3")
 kriterier_per_felt_alle = kriterier_per_fagfelt(kriterier_fase3)
+kriterium_info = {k["kriterium"]: k for k in kriterier_fase3}
 
 if not butikker:
-    onboarding_steg(1)
     tom_tilstand("📋", "Fant ingen butikker i regnearket", "Sjekk Innstillinger.")
     st.page_link("pages/innstillinger.py", label="Gå til Innstillinger", icon=":material/settings:")
     st.stop()
-
 if not jury:
     st.info("Ingen jurymedlemmer er lagt til ennå – gjør det under **Innstillinger → Jury og kriterier**.", icon=":material/info:")
     st.page_link("pages/innstillinger.py", label="Gå til Innstillinger", icon=":material/settings:")
     st.stop()
 
-# ── Jurymedlem – vanlig selectbox bundet til session_state (ikke skjult tilstand) ──
-navn_liste = sorted(jury.keys())
-forrige = st.session_state.get("_jurynavn")
-jurynavn = st.selectbox("Ditt navn (jurymedlem)", navn_liste, key="_jurynavn")
-
-if forrige and forrige != jurynavn and st.session_state.get("_har_ulagrede_endringer"):
-    st.warning(f"Du byttet fra **{forrige}** med ulagrede endringer på butikken du sto på – de ble ikke lagret.", icon=":material/warning:")
-st.session_state["_har_ulagrede_endringer"] = False
+# ── Topp: navn + tildeling + lenke til regnearket ──
+navn_liste_jury = sorted(jury.keys())
+tc1, tc2 = st.columns([4, 1])
+with tc1:
+    jurynavn = st.selectbox("Ditt navn (jurymedlem)", navn_liste_jury, key="_jurynavn")
+    beskrivelse = beskriv_tildeling(jurynavn, jury, kriterier_per_felt_alle)
+    if beskrivelse:
+        st.caption(f"_{beskrivelse}_")
+with tc2:
+    st.link_button("Åpne regnearket", sh.url, icon=":material/open_in_new:", use_container_width=True)
 
 mine = mine_kriterier(jury, jurynavn)
-beskrivelse = beskriv_tildeling(jurynavn, jury, kriterier_per_felt_alle)
-if beskrivelse:
-    st.caption(f"_{beskrivelse}_")
-
 if not mine:
     tom_tilstand("🤷", "Ingen kriterier tildelt deg ennå", "Ta kontakt med juryleder for å bli tildelt kriterier å vurdere.")
     st.stop()
 
-onboarding_steg(2)
-
-# Mine kriterier, gruppert per fagfelt (i samme rekkefølge som fagfeltene vises ellers)
 mine_per_felt = {felt: [k for k in krit if k in mine] for felt, krit in kriterier_per_felt_alle.items()}
 mine_per_felt = {felt: krit for felt, krit in mine_per_felt.items() if krit}
 mine_kriterier_flat = [k for krit in mine_per_felt.values() for k in krit]
-kriterium_info = {k["kriterium"]: k for k in kriterier_fase3}
 
 try:
-    rating_data = read_ratings(sh)
-    kommentar_rader = read_kommentarer(sh)
+    alle_vurderinger = read_vurderinger(sh)
+    alle_generelle = read_generelle_kommentarer(sh)
 except Exception as e:
     st.error(f"Kunne ikke lese vurderinger: {e}", icon=":material/error:")
     st.stop()
 
-# Mine kriterium-kommentarer – kun egne (hver har sin egen rad i Kommentarer,
-# flere jurymedlemmer kan ha kommentert samme kriterium hvis det er delt).
-mine_kommentar_oppslag = {
-    (r["butikk"], r["kriterium"]): r["kommentar"]
-    for r in kommentar_rader if r["jurymedlem"] == jurynavn
-}
-# Til "har noen kommentert dette?"-ikon i Mine butikker/detaljpanel.
-noen_kommentar_oppslag = {(r["butikk"], r["kriterium"]) for r in kommentar_rader if r["kommentar"]}
+mine_oppslag = mine_scorer(alle_vurderinger, jurynavn)  # (butikk,kriterium) -> {score,kommentar,sist_endret}
+gruppert_alle = grupper_vurderinger(alle_vurderinger)  # for kommentar-ikon på tvers av jury
+generell_per_butikk = {}
+for g in alle_generelle:
+    generell_per_butikk.setdefault(g["butikk"], []).append(g)
 
 navn_liste_butikker = sorted(butikker.keys())
 
 
-def scorer(navn):
-    return rating_data.get(navn, {}).get("scorer", {})
+def mine_scorer_for(navn):
+    return {krit: mine_oppslag[(navn, krit)]["score"] for krit in mine_kriterier_flat if (navn, krit) in mine_oppslag}
 
 
 def status(navn):
-    return status_for_scorer(scorer(navn), mine_kriterier_flat)
+    return status_for_scorer(mine_scorer_for(navn), mine_kriterier_flat)
 
 
-def snitt(navn):
-    return snitt_av_scorer(scorer(navn), mine_kriterier_flat)
+def status_per_fagfelt(navn):
+    resultat = {}
+    for fagfelt, kriterier in mine_per_felt.items():
+        besvart = sum(1 for k in kriterier if (navn, k) in mine_oppslag)
+        resultat[fagfelt] = (besvart, len(kriterier))
+    return resultat
 
 
-def kommentar_for(navn, fagfelt):
-    return rating_data.get(navn, {}).get("kommentarer", {}).get(fagfelt, "")
+def har_kommentar(navn):
+    return any(
+        (navn, k) in mine_oppslag and mine_oppslag[(navn, k)]["kommentar"]
+        for k in mine_kriterier_flat
+    ) or bool(generell_per_butikk.get(navn))
 
 
 antall_ferdig = sum(1 for n in navn_liste_butikker if status(n) == "Ferdig")
-snitt_verdier = [snitt(n) for n in navn_liste_butikker if snitt(n) is not None]
-eget_snitt = (sum(snitt_verdier) / len(snitt_verdier)) if snitt_verdier else None
+antall_pabegynt = sum(1 for n in navn_liste_butikker if status(n) == "Påbegynt")
 
 fremdriftslinje(
     (antall_ferdig / len(navn_liste_butikker)) if navn_liste_butikker else 0,
-    f"Vurdert: {antall_ferdig} av {len(navn_liste_butikker)}" + (f" · eget snitt {eget_snitt:.2f}" if eget_snitt else ""),
+    f"{antall_ferdig} av {len(navn_liste_butikker)} butikker ferdig · {antall_pabegynt} påbegynt",
 )
-
-visning = st.segmented_control("Visning", ["Fokus", "Mine butikker"], key="_visning_vurdering", default="Fokus", label_visibility="collapsed")
 st.write("")
 
 
-def _marker_endret():
-    st.session_state["_har_ulagrede_endringer"] = True
+def _nullstill_butikk_state(navn):
+    """Fjerner session_state-nøklene for denne butikkens widgetar, slik at de
+    seedes PÅ NYTT fra det ferske sheet-innholdet – kalles kun når visningen
+    faktisk BYTTER til en annen butikk enn sist (se forklaring øverst i fila)."""
+    for k in mine_kriterier_flat:
+        for prefiks in ("seg_", "kom_krit_"):
+            st.session_state.pop(f"{prefiks}{navn}_{k}", None)
+    st.session_state.pop(f"generell_{navn}", None)
 
 
 def lagre_denne(navn):
     ok = True
+    manglende_kommentar = []
     for fagfelt, kriterier in mine_per_felt.items():
-        vurderinger = []
         for krit in kriterier:
-            if st.session_state.get(f"na_{navn}_{krit}"):
+            valg = st.session_state.get(f"seg_{navn}_{krit}")
+            kommentar_krit = (st.session_state.get(f"kom_krit_{navn}_{krit}") or "").strip()
+
+            if valg == "Kan ikke vurdere":
                 score = IKKE_VURDERT
+            elif valg is not None:
+                score = str(valg)
             else:
-                feedback_verdi = st.session_state.get(f"score_{navn}_{krit}")
-                if feedback_verdi is None:
-                    continue  # ikke klikket på ennå – skal IKKE lagres som noe, og ikke telle i snittet
-                score = feedback_verdi + 1
-            vurderinger.append((krit, score))
+                continue  # ikke besvart ennå – hopp over, lagre ikke noe
+
+            if er_tall(score) and int(score) <= 3 and not kommentar_krit:
+                manglende_kommentar.append(krit)
+                continue
 
             try:
-                kommentar_krit = st.session_state.get(f"kom_krit_{navn}_{krit}", "")
-                upsert_kommentar(sh, navn, jurynavn, fagfelt, krit, kommentar_krit)
+                upsert_vurdering(sh, navn, jurynavn, fagfelt, krit, score, kommentar_krit)
             except Exception as e:
                 st.session_state["_lagringstilstand"] = ("feil", str(e))
                 ok = False
 
-        kommentar = st.session_state.get(f"kom_{navn}_{fagfelt}", "")
-        if vurderinger:
-            try:
-                upsert_rating(sh, navn, jurynavn, fagfelt, vurderinger, kommentar)
-            except Exception as e:
-                st.session_state["_lagringstilstand"] = ("feil", str(e))
-                ok = False
+    if manglende_kommentar:
+        st.session_state["_lagringstilstand"] = ("feil", "Kommentar er påkrevd ved score 1–3: " + ", ".join(manglende_kommentar))
+        return False
+
+    generell_tekst = (st.session_state.get(f"generell_{navn}") or "").strip()
+    try:
+        upsert_generell_kommentar(sh, navn, jurynavn, generell_tekst)
+    except Exception as e:
+        st.session_state["_lagringstilstand"] = ("feil", str(e))
+        ok = False
+
     if ok:
         st.session_state["_lagringstilstand"] = ("lagret", datetime.now().strftime("%H:%M"))
-        st.session_state["_har_ulagrede_endringer"] = False
-    read_kommentarer.clear()
     return ok
 
 
@@ -166,37 +178,65 @@ def neste_uferdige(gjeldende):
     return None
 
 
+def _gyldig_status_tekst(navn):
+    s = status(navn)
+    return {"Ferdig": "✅ Ferdig", "Påbegynt": "◐ Påbegynt", "Ikke startet": "○ Ikke startet"}[s]
+
+
+def _bytt_til(navn):
+    forrige = st.session_state.get("_sist_vist_butikk")
+    if forrige != navn:
+        _nullstill_butikk_state(navn)
+        st.session_state["_sist_vist_butikk"] = navn
+    st.session_state["_apnet_butikk"] = navn
+
+
 @st.fragment
-def vis_butikkort(navn):
+def vis_vurderingsvisning():
+    navn = st.session_state.get("_apnet_butikk")
+    if navn not in navn_liste_butikker:
+        st.session_state["_apnet_butikk"] = None
+        st.rerun()
     info = butikker[navn]
     i = navn_liste_butikker.index(navn)
+
+    if st.button("← Tilbake til lista", icon=":material/arrow_back:"):
+        st.session_state["_apnet_butikk"] = None
+        st.rerun(scope="fragment")
+        return
 
     hc1, hc2 = st.columns([3, 1])
     with hc1:
         st.markdown(f"### {navn}")
         klasse_badge(info.get("klasse", "–"))
         st.caption(info.get("bransje", "–"))
-        st.caption(f"Butikk {i + 1} av {len(navn_liste_butikker)}" + (" · ✅ ferdig" if status(navn) == "Ferdig" else " · påbegynt" if status(navn) == "Påbegynt" else ""))
+        st.caption(f"Butikk {i + 1} av {len(navn_liste_butikker)} · {_gyldig_status_tekst(navn)}")
     with hc2:
         if info.get("url"):
             st.link_button("Besøk butikk", info["url"], icon=":material/open_in_new:", use_container_width=True)
-        navn_snitt = snitt(navn)
-        if navn_snitt is not None:
-            st.metric("Mitt snitt", f"{navn_snitt:.2f}")
+
+    hopp_til = st.selectbox(
+        "Hopp direkte til en annen butikk", navn_liste_butikker,
+        index=i, key="_hopp_til_butikk",
+        format_func=lambda n: f"{_gyldig_status_tekst(n).split(' ')[0]} {n}",
+    )
+    if hopp_til != navn:
+        lagre_denne(navn)
+        _bytt_til(hopp_til)
+        st.rerun(scope="fragment")
 
     st.write("")
     for fagfelt, kriterier in mine_per_felt.items():
         farge = FAGFELT_FARGE.get(fagfelt, "#888")
-        st.markdown(f'<div style="border-left:4px solid {farge};padding-left:10px;margin:14px 0 8px 0;font-weight:700;">{fagfelt}</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="border-left:4px solid {farge};padding-left:10px;margin:14px 0 10px 0;font-weight:700;">{fagfelt}</div>', unsafe_allow_html=True)
         for krit in kriterier:
-            eksisterende_score = scorer(navn).get(krit)
+            eksisterende = mine_oppslag.get((navn, krit), {})
+            eksisterende_score = eksisterende.get("score")
             var_na = eksisterende_score == IKKE_VURDERT
             info_k = kriterium_info.get(krit, {})
-            eksisterende_kommentar_krit = mine_kommentar_oppslag.get((navn, krit), "")
 
-            tc1, tc2 = st.columns([5, 1])
-            tc1.markdown(f"**{krit}**" + (f"  \n_{info_k['kort']}_" if info_k.get("kort") else ""))
-            with tc2.popover("Les mer", icon=":material/help:", use_container_width=True):
+            st.markdown(f"**{krit}**" + (f"  \n_{info_k['kort']}_" if info_k.get("kort") else ""))
+            with st.popover("Les mer", icon=":material/help:"):
                 if info_k.get("utfyllende"):
                     st.markdown(info_k["utfyllende"])
                 st.markdown(f"**1:** {info_k.get('skala1', '–')}")
@@ -205,114 +245,87 @@ def vis_butikkort(navn):
                 if info_k.get("eksempler"):
                     st.caption(info_k["eksempler"])
 
-            sc1, sc2 = st.columns([1, 2])
-            with sc1:
-                na_key = f"na_{navn}_{krit}"
-                if na_key not in st.session_state:
-                    st.session_state[na_key] = var_na
-                score_key = f"score_{navn}_{krit}"
-                # VIKTIG: ingen standardverdi settes her når det ikke finnes en
-                # ekte lagret score – da vises stjernene TOMME (ikke vurdert),
-                # i stedet for forhåndsvalgt på 3 (det var buggen som er rettet).
-                if score_key not in st.session_state and er_tall(eksisterende_score):
-                    st.session_state[score_key] = int(eksisterende_score) - 1
-                if not st.session_state[na_key]:
-                    st.feedback("stars", key=score_key, on_change=_marker_endret)
-                st.checkbox("Kan ikke vurdere", key=na_key, on_change=_marker_endret)
-            with sc2:
-                vis_kommentar_key = f"vis_kommentar_{navn}_{krit}"
-                if vis_kommentar_key not in st.session_state:
-                    st.session_state[vis_kommentar_key] = bool(eksisterende_kommentar_krit)
-                if not st.session_state[vis_kommentar_key]:
-                    if st.button("+ Legg til kommentar", key=f"btn_kom_{navn}_{krit}"):
-                        st.session_state[vis_kommentar_key] = True
-                        st.rerun(scope="fragment")
-                else:
-                    st.text_area(
-                        "Kommentar", value=eksisterende_kommentar_krit, key=f"kom_krit_{navn}_{krit}",
-                        label_visibility="collapsed", placeholder=f"Kommentar til «{krit}» (valgfritt)…",
-                        height=68, on_change=_marker_endret,
-                    )
+            seg_key = f"seg_{navn}_{krit}"
+            if seg_key not in st.session_state:
+                st.session_state[seg_key] = "Kan ikke vurdere" if var_na else (int(eksisterende_score) if er_tall(eksisterende_score) else None)
+            valg = st.segmented_control("Score", [1, 2, 3, 4, 5, "Kan ikke vurdere"], key=seg_key, label_visibility="collapsed")
+
+            kom_key = f"kom_krit_{navn}_{krit}"
+            pakrevd = isinstance(valg, int) and valg <= 3
+            st.text_area(
+                "Kommentar" + (" (påkrevd)" if pakrevd else " (valgfritt)"), value=eksisterende.get("kommentar", ""),
+                key=kom_key, placeholder=f"Kommentar til «{krit}»" + (" – påkrevd ved lav score" if pakrevd else "…"),
+                height=68,
+            )
             st.write("")
 
-        st.text_area(
-            f"Generell kommentar – {fagfelt}" if len(mine_per_felt) > 1 else "Generell kommentar",
-            value=kommentar_for(navn, fagfelt), key=f"kom_{navn}_{fagfelt}",
-            placeholder="Skriv en samlet kommentar (valgfritt)…", height=70,
-            on_change=_marker_endret,
-        )
+    st.divider()
+    st.markdown("**Generell kommentar om butikken**")
+    generell_key = f"generell_{navn}"
+    min_generell = next((g["kommentar"] for g in generell_per_butikk.get(navn, []) if g["jurymedlem"] == jurynavn), "")
+    if generell_key not in st.session_state:
+        st.session_state[generell_key] = min_generell
+    st.text_area("Din generelle kommentar", key=generell_key, placeholder="Valgfri generell kommentar om hele butikken …", height=68, label_visibility="collapsed")
+    andre = [g for g in generell_per_butikk.get(navn, []) if g["jurymedlem"] != jurynavn]
+    if andre:
+        with st.expander(f"Se andres generelle kommentarer ({len(andre)})"):
+            for g in andre:
+                st.caption(f"**{g['jurymedlem']}** ({g['sist_endret']}): {g['kommentar']}")
 
     st.write("")
     tilstand = st.session_state.get("_lagringstilstand")
     if tilstand:
         lagringsstatus(tilstand[0], tilstand[1])
 
-    a1, a2, a3 = st.columns([1, 1, 2])
+    a1, a2 = st.columns(2)
     if a1.button("← Forrige", disabled=(i == 0), use_container_width=True):
         lagre_denne(navn)
-        st.session_state["_fokus_navn"] = navn_liste_butikker[max(0, i - 1)]
-        st.rerun()
-    if a2.button("Hopp over →", disabled=(i >= len(navn_liste_butikker) - 1), use_container_width=True, help="Går videre UTEN å lagre endringer på denne butikken."):
-        st.session_state["_fokus_navn"] = navn_liste_butikker[i + 1]
-        st.rerun()
-    if a3.button("💾 Lagre og neste", type="primary", use_container_width=True):
+        _bytt_til(navn_liste_butikker[max(0, i - 1)])
+        st.rerun(scope="fragment")
+    if a2.button("💾 Lagre og neste", type="primary", use_container_width=True):
         if lagre_denne(navn):
-            st.session_state["_fokus_navn"] = neste_uferdige(navn)
-            st.rerun()
+            _bytt_til(neste_uferdige(navn) or navn)
+            st.rerun(scope="fragment")
         else:
-            st.rerun()
+            st.rerun(scope="fragment")
 
 
-if visning == "Mine butikker":
-    sok = st.text_input("🔍 Søk etter butikk", "")
-    fc1, fc2 = st.columns(2)
-    status_filter = fc1.multiselect("Status", ["Ikke startet", "Påbegynt", "Ferdig"])
-    klasse_filter = fc2.multiselect("Størrelsesklasse", sorted({butikker[n].get("klasse", "") for n in navn_liste_butikker if butikker[n].get("klasse")}))
+def vis_butikkliste():
+    sok = st.text_input("Søk", placeholder="Søk etter butikk …", icon=":material/search:", label_visibility="collapsed")
+    fc1, fc2 = st.columns([2, 1])
+    status_filter = fc1.multiselect("Status", ["Ikke startet", "Påbegynt", "Ferdig"], placeholder="Alle statuser", label_visibility="collapsed")
+    kun_uferdige = fc2.checkbox("Vis kun ikke ferdige")
 
-    rader, navn_for_rad = [], []
     for navn in navn_liste_butikker:
-        info = butikker[navn]
         if sok and sok.lower() not in navn.lower():
             continue
         s = status(navn)
         if status_filter and s not in status_filter:
             continue
-        if klasse_filter and info.get("klasse") not in klasse_filter:
+        if kun_uferdige and s == "Ferdig":
             continue
-        sn = snitt(navn)
-        har_kommentar = any((navn, k) in noen_kommentar_oppslag for k in mine_kriterier_flat)
-        rader.append({
-            "Butikk": navn, "Klasse": info.get("klasse", "–"), "Bransje": info.get("bransje", "–"),
-            "Status": s, "Mitt snitt": f"{sn:.2f}" if sn is not None else "–",
-            "💬": "💬" if har_kommentar else "",
-        })
-        navn_for_rad.append(navn)
+        info = butikker[navn]
+        with st.container(border=True):
+            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
+            with c1:
+                if st.button(navn, key=f"apne_{navn}", icon=":material/chevron_right:", use_container_width=True):
+                    _bytt_til(navn)
+                    st.rerun()
+                klasse_badge(info.get("klasse", "–"))
+            with c2:
+                st.markdown(_gyldig_status_tekst(navn))
+                per_felt = status_per_fagfelt(navn)
+                st.caption(" · ".join(f"{b}/{t} {f[:3]}" for f, (b, t) in per_felt.items()))
+            with c3:
+                if har_kommentar(navn):
+                    st.caption("💬 Kommentert")
+            with c4:
+                if info.get("url"):
+                    st.link_button("Besøk", info["url"], icon=":material/open_in_new:", use_container_width=True)
 
-    rekkefolge_vekt = {"Ikke startet": 0, "Påbegynt": 1, "Ferdig": 2}
-    sortert = sorted(zip(rader, navn_for_rad), key=lambda par: rekkefolge_vekt.get(par[0]["Status"], 0))
-    rader = [r for r, _ in sortert]
-    navn_for_rad = [n for _, n in sortert]
 
-    st.caption(f"{len(rader)} av {len(navn_liste_butikker)} butikker")
-    hendelse = st.dataframe(rader, use_container_width=True, hide_index=True, on_select="rerun", selection_mode="single-row")
-    if hendelse and hendelse.selection and hendelse.selection.rows:
-        valgt = hendelse.selection.rows[0]
-        st.session_state["_fokus_navn"] = navn_for_rad[valgt]
-        st.session_state["_visning_vurdering"] = "Fokus"
-        st.rerun()
-
-else:  # Fokus
-    if "_fokus_navn" not in st.session_state or st.session_state["_fokus_navn"] not in navn_liste_butikker:
-        st.session_state["_fokus_navn"] = next((n for n in navn_liste_butikker if status(n) != "Ferdig"), navn_liste_butikker[0])
-
-    if antall_ferdig == len(navn_liste_butikker):
-        st.success("🎉 Du har vurdert alle dine tildelte kriterier for alle butikkene!", icon=":material/celebration:")
-        kol = st.columns(2)
-        kol[0].metric("Vurdert", f"{antall_ferdig} av {len(navn_liste_butikker)}")
-        kol[1].metric("Eget snitt", f"{eget_snitt:.2f}" if eget_snitt else "–")
-        st.page_link("pages/butikker.py", label="Se totaloversikten over alle butikkene", icon=":material/storefront:")
-        st.divider()
-        st.caption("Du kan fortsatt åpne og redigere enkeltbutikker under.")
-
+if st.session_state.get("_apnet_butikk"):
     with st.container(border=True):
-        vis_butikkort(st.session_state["_fokus_navn"])
+        vis_vurderingsvisning()
+else:
+    vis_butikkliste()

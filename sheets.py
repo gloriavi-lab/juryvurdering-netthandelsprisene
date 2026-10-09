@@ -636,3 +636,192 @@ def upsert_kommentar(sh, butikk, jurymedlem, fagfelt, kriterium, kommentar):
                 fase2.clear_note(celle)
     except Exception:
         pass  # notatet er kun en bekvemmelighet – skal aldri blokkere selve lagringen
+
+
+# ═════════════════════════════════════════════
+# NY MODELL (etter brukertesting): én fane "Vurderinger" er eneste kilde til
+# sannhet for score+kommentar per kriterium – erstatter den tidligere delte
+# modellen (verdier i "Rangering ekspertvurdering"-rutenettet + en egen
+# "Kommentarer"-fane + celle-notater). Den delte skrivingen (to separate
+# upsert-kall per lagring, pluss notat-speiling) var rotårsaken til at en
+# slettet kommentar kunne "komme tilbake": et av stedene kunne feile eller
+# henge igjen uten at det andre visste om det. Med én fane og én upsert-
+# operasjon per rad finnes ikke det problemet lenger – og det løser også at
+# flere jurymedlemmer kan dele samme kriterium (hver får sin egen rad).
+# ═════════════════════════════════════════════
+VURDERINGER_FANE = "Vurderinger"
+VURDERINGER_HEADER2 = ["Butikk", "Jurymedlem", "Fagfelt", "Kriterium", "Score", "Kommentar", "Sist endret"]
+GENERELLE_KOMMENTARER_FANE = "Generelle kommentarer"
+GENERELLE_KOMMENTARER_HEADER = ["Butikk", "Jurymedlem", "Kommentar", "Sist endret"]
+
+
+def _sikre_enkel_fane_med_header(sh, navn, header):
+    try:
+        return sh.worksheet(navn)
+    except gspread.WorksheetNotFound:
+        from theme import GRUNNKOLONNE_FARGE
+        ws = sh.add_worksheet(title=navn, rows=2000, cols=len(header))
+        ws.append_row(header)
+        try:
+            ws.format("A1:" + gspread.utils.rowcol_to_a1(1, len(header)).rstrip("1") + "1", {
+                "backgroundColor": _hex_til_rgb(GRUNNKOLONNE_FARGE),
+                "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}},
+            })
+            ws.freeze(rows=1)
+        except Exception:
+            pass
+        return ws
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def read_vurderinger(_sh):
+    """Liste av dicts – én per lagret (butikk, jurymedlem, kriterium).
+    rad-nummeret er med slik at upsert_vurdering kan oppdatere/slette presist."""
+    ws = _sikre_enkel_fane_med_header(_sh, VURDERINGER_FANE, VURDERINGER_HEADER2)
+    rader = ws.get_all_values()
+    resultat = []
+    for i, rad in enumerate(rader[1:] if len(rader) > 1 else [], start=2):
+        if len(rad) >= 5 and rad[0] and rad[4]:
+            resultat.append({
+                "rad": i, "butikk": rad[0], "jurymedlem": rad[1], "fagfelt": rad[2],
+                "kriterium": rad[3], "score": rad[4], "kommentar": rad[5] if len(rad) > 5 else "",
+                "sist_endret": rad[6] if len(rad) > 6 else "",
+            })
+    return resultat
+
+
+def upsert_vurdering(sh, butikk, jurymedlem, fagfelt, kriterium, score, kommentar=""):
+    """Oppretter/oppdaterer raden for akkurat denne (butikk, jurymedlem,
+    kriterium)-kombinasjonen. score=None/tom SLETTER raden (tilsvarer «ikke
+    vurdert» – skal ikke stå igjen som noe i det hele tatt)."""
+    ws = _sikre_enkel_fane_med_header(sh, VURDERINGER_FANE, VURDERINGER_HEADER2)
+    rader = ws.get_all_values()
+    rad_nr = None
+    for i, rad in enumerate(rader[1:] if len(rader) > 1 else [], start=2):
+        if len(rad) >= 4 and rad[0] == butikk and rad[1] == jurymedlem and rad[3] == kriterium:
+            rad_nr = i
+            break
+
+    tidsstempel = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if score:
+        verdier = [butikk, jurymedlem, fagfelt, kriterium, str(score), kommentar or "", tidsstempel]
+        if rad_nr:
+            ws.update([verdier], range_name=f"A{rad_nr}:G{rad_nr}")
+        else:
+            ws.append_row(verdier)
+    elif rad_nr:
+        ws.spreadsheet.batch_update({"requests": [{
+            "deleteDimension": {"range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": rad_nr - 1, "endIndex": rad_nr}}
+        }]})
+    read_vurderinger.clear()
+
+
+@st.cache_data(ttl=15, show_spinner=False)
+def read_generelle_kommentarer(_sh):
+    ws = _sikre_enkel_fane_med_header(_sh, GENERELLE_KOMMENTARER_FANE, GENERELLE_KOMMENTARER_HEADER)
+    rader = ws.get_all_values()
+    resultat = []
+    for i, rad in enumerate(rader[1:] if len(rader) > 1 else [], start=2):
+        if len(rad) >= 2 and rad[0]:
+            resultat.append({"rad": i, "butikk": rad[0], "jurymedlem": rad[1], "kommentar": rad[2] if len(rad) > 2 else "", "sist_endret": rad[3] if len(rad) > 3 else ""})
+    return resultat
+
+
+def upsert_generell_kommentar(sh, butikk, jurymedlem, kommentar):
+    ws = _sikre_enkel_fane_med_header(sh, GENERELLE_KOMMENTARER_FANE, GENERELLE_KOMMENTARER_HEADER)
+    rader = ws.get_all_values()
+    rad_nr = None
+    for i, rad in enumerate(rader[1:] if len(rader) > 1 else [], start=2):
+        if len(rad) >= 2 and rad[0] == butikk and rad[1] == jurymedlem:
+            rad_nr = i
+            break
+    tidsstempel = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if kommentar and kommentar.strip():
+        verdier = [butikk, jurymedlem, kommentar.strip(), tidsstempel]
+        if rad_nr:
+            ws.update([verdier], range_name=f"A{rad_nr}:D{rad_nr}")
+        else:
+            ws.append_row(verdier)
+    elif rad_nr:
+        ws.spreadsheet.batch_update({"requests": [{
+            "deleteDimension": {"range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": rad_nr - 1, "endIndex": rad_nr}}
+        }]})
+    read_generelle_kommentarer.clear()
+
+
+def sikkerhetskopier_alle_faner(sh):
+    """Dupliserer HVER fane i regnearket med et tidsstempel i navnet, FØR en
+    strukturendring. Returnerer listen med nye fanenavn."""
+    tidsstempel = datetime.now().strftime("%Y%m%d-%H%M%S")
+    nye_navn = []
+    for ws in list(sh.worksheets()):
+        if ws.title.startswith("Backup_"):
+            continue  # ikke sikkerhetskopier gamle sikkerhetskopier
+        nytt_navn = f"Backup_{tidsstempel}_{ws.title}"[:99]  # Google Sheets har en lengdegrense på fanenavn
+        sh.duplicate_sheet(ws.id, new_sheet_name=nytt_navn)
+        nye_navn.append(nytt_navn)
+    return nye_navn
+
+
+def migrer_til_vurderinger_fane(sh):
+    """Flytter eksisterende data fra den gamle modellen (Rangering ekspert-
+    vurdering-rutenettet + den gamle Kommentarer-fanen) inn i Vurderinger +
+    Generelle kommentarer. Tar sikkerhetskopi av ALT først. Ingen rader går
+    tapt, men historiske ENKELTSCORER manglet opprinnelig jurymedlem-
+    attribusjon i rutenettet (feltet fantes rett og slett ikke) – disse
+    attribueres best mulig (fra en matchende gammel kommentarrad, ellers
+    radens "Endret av", ellers "Ukjent"). Returnerer en oppsummering."""
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+
+    try:
+        fase2 = sh.worksheet(FASE2_FANE)
+    except gspread.WorksheetNotFound:
+        return {"backup": backup_navn, "antall_for": 0, "antall_etter": 0, "detaljer": "Ingen «Rangering ekspertvurdering»-fane funnet – ingenting å flytte."}
+
+    grunn, krit, _ = _header_data(fase2, grunnkolonner=GRUNNKOLONNER + [SNITT_KOLONNE_NAVN] + EKSTRA_KOLONNER)
+    formatert = _rå_formatert(fase2)
+    kol_butikk = grunn.get("Butikk")
+    kol_endret_av = grunn.get("Endret av")
+
+    try:
+        gamle_kommentarer = read_kommentarer.__wrapped__(sh)
+    except Exception:
+        gamle_kommentarer = []
+    kommentar_oppslag = {(r["butikk"], r["kriterium"]): (r["jurymedlem"], r["kommentar"]) for r in gamle_kommentarer}
+
+    antall_for = 0
+    antall_etter = 0
+    generelle_samlet = {}  # (butikk, jurymedlem) -> [kommentartekster]
+
+    for r in range(FORSTE_DATARAD, len(formatert) + 1):
+        rad = formatert[r - 1]
+        butikk = rad[kol_butikk - 1].strip() if kol_butikk and len(rad) >= kol_butikk else ""
+        if not butikk:
+            continue
+        endret_av_fallback = rad[kol_endret_av - 1].strip() if kol_endret_av and len(rad) >= kol_endret_av else ""
+
+        for (fagfelt, kriterium), kol in krit.items():
+            verdi = rad[kol - 1].strip() if len(rad) >= kol else ""
+            if not verdi:
+                continue
+            antall_for += 1
+            if (butikk, kriterium) in kommentar_oppslag:
+                jurymedlem, kommentar = kommentar_oppslag[(butikk, kriterium)]
+            else:
+                jurymedlem, kommentar = (endret_av_fallback or "Ukjent"), ""
+            upsert_vurdering(sh, butikk, jurymedlem, fagfelt, kriterium, verdi, kommentar)
+            antall_etter += 1
+
+        for fagfelt in set(f for f, _ in krit.keys()):
+            kol_generell = grunn.get(f"{KOMMENTAR_PREFIKS}{fagfelt}")
+            if kol_generell and len(rad) >= kol_generell and rad[kol_generell - 1].strip():
+                nokkel = (butikk, endret_av_fallback or "Ukjent")
+                generelle_samlet.setdefault(nokkel, []).append(rad[kol_generell - 1].strip())
+
+    for (butikk, jurymedlem), tekster in generelle_samlet.items():
+        upsert_generell_kommentar(sh, butikk, jurymedlem, " | ".join(tekster))
+
+    return {
+        "backup": backup_navn, "antall_for": antall_for, "antall_etter": antall_etter,
+        "detaljer": f"{antall_for} enkeltscorer funnet i det gamle rutenettet, {antall_etter} rader skrevet til Vurderinger. {len(generelle_samlet)} generelle kommentarer migrert.",
+    }

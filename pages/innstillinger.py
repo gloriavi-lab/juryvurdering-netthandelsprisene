@@ -12,12 +12,13 @@ from jury import (
 )
 from sheets import (
     FASE1_FANE, FASE2_FANE, er_finale_last, finale_las_info, fjern_finale_las,
-    legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, read_fase1_scores, read_ratings, read_stores,
-    test_tilkobling,
+    legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, migrer_til_vurderinger_fane, read_fase1_scores,
+    read_ratings, read_stores, read_vurderinger, sikkerhetskopier_alle_faner, test_tilkobling, VURDERINGER_FANE,
 )
 from theme import FAGFELT_FARGE
 
 topptekst("Innstillinger")
+st.info("**Kun for administrator** – jurymedlemmer trenger ikke bruke denne siden.", icon=":material/admin_panel_settings:")
 
 sh = st.session_state.get("_sh")
 
@@ -60,10 +61,67 @@ except Exception as e:
 st.caption(f"Leser butikklisten direkte fra fanen «{FASE1_FANE}» – {len(butikker)} butikker funnet.")
 
 if advarsler:
+    with st.expander(f"Avvik i regnearket ({len(advarsler)})", expanded=False, icon=":material/warning:"):
+        for a in advarsler:
+            st.markdown(f"- {a}")
+# Ingenting vises her i det hele tatt når regnearket er i orden – ingen tom boks, ingen varsel.
+
+st.divider()
+st.subheader("Datamodell", anchor=False)
+try:
+    antall_vurderinger = len(read_vurderinger(sh))
+except Exception:
+    antall_vurderinger = 0
+if antall_vurderinger > 0:
+    st.success(f"«{VURDERINGER_FANE}»-fanen er i bruk – {antall_vurderinger} lagrede vurderinger.", icon=":material/check_circle:")
+else:
     st.warning(
-        "Fant noen rader appen ikke forstår helt – resten fungerer som normalt:\n\n" + "\n".join(f"- {a}" for a in advarsler),
+        f"«{VURDERINGER_FANE}»-fanen er tom. Hvis dere allerede har vurderinger liggende i det gamle "
+        f"«{FASE2_FANE}»-rutenettet, må de flyttes hit før jury fortsetter å jobbe i appen.",
         icon=":material/warning:",
     )
+
+bkc1, bkc2 = st.columns(2)
+if bkc1.button("Ta sikkerhetskopi av alle faner nå", icon=":material/backup:", use_container_width=True):
+    with st.spinner("Sikkerhetskopierer …"):
+        nye_navn = sikkerhetskopier_alle_faner(sh)
+    st.success(f"{len(nye_navn)} faner sikkerhetskopiert: {', '.join(nye_navn)}", icon=":material/check_circle:")
+
+if bkc2.button("Flytt data til «Vurderinger»-fanen", icon=":material/database:", use_container_width=True, type="primary" if antall_vurderinger == 0 else "secondary"):
+    st.session_state["_vis_migrer_dialog"] = True
+
+
+@st.dialog("Flytte data til Vurderinger-fanen?")
+def migrer_dialog():
+    st.write(
+        "Dette tar FØRST sikkerhetskopi av absolutt alle faner i regnearket, deretter leser alle "
+        f"eksisterende scorer/kommentarer fra «{FASE2_FANE}»-rutenettet og den gamle «Kommentarer»-fanen, "
+        "og skriver dem inn i den nye «Vurderinger»-fanen. Ingen rader slettes eller går tapt – "
+        "originalen ligger urørt i sikkerhetskopien."
+    )
+    st.caption(
+        "Merk: det gamle rutenettet sporet ikke hvem som satte HVER enkelt score (kun hvem som sist "
+        "rørte hele raden) – historiske scorer attribueres derfor til den som kommenterte (hvis kjent), "
+        "ellers til den som sist endret raden, ellers «Ukjent»."
+    )
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True):
+        st.rerun()
+    if c2.button("Ja, flytt data nå", type="primary", use_container_width=True, icon=":material/database:"):
+        with st.spinner("Sikkerhetskopierer og flytter data …"):
+            resultat = migrer_til_vurderinger_fane(sh)
+        st.session_state["_migrering_resultat"] = resultat
+        st.rerun()
+
+
+if st.session_state.get("_vis_migrer_dialog"):
+    st.session_state["_vis_migrer_dialog"] = False
+    migrer_dialog()
+
+if st.session_state.get("_migrering_resultat"):
+    r = st.session_state.pop("_migrering_resultat")
+    st.success(f"Ferdig! {r['detaljer']}", icon=":material/check_circle:")
+    st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
 
 st.divider()
 st.subheader("Ekspertvurdering – vurderingsark", anchor=False)

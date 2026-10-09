@@ -166,3 +166,35 @@ def snitt_av_scorer(scorer: dict, kriterier: list):
     ikke med). Returnerer None hvis ingen tallscorer er gitt ennå."""
     tall = [float(scorer[k]) for k in kriterier if k in scorer and er_tall(scorer[k])]
     return (sum(tall) / len(tall)) if tall else None
+
+
+# ─────────────────────────────────────────────
+# Hjelpere for den nye "Vurderinger"-modellen (én rad per butikk+jurymedlem+
+# kriterium – flere jurymedlemmer kan dele samme kriterium, se sheets.py)
+# ─────────────────────────────────────────────
+def grupper_vurderinger(rader: list):
+    """rader fra sheets.read_vurderinger(). Returnerer
+    {(butikk, kriterium): [(jurymedlem, score, kommentar, sist_endret), ...]}."""
+    gruppert = {}
+    for r in rader:
+        nokkel = (r["butikk"], r["kriterium"])
+        gruppert.setdefault(nokkel, []).append((r["jurymedlem"], r["score"], r["kommentar"], r["sist_endret"]))
+    return gruppert
+
+
+def mine_scorer(rader: list, jurymedlem: str) -> dict:
+    """{(butikk, kriterium): {"score":, "kommentar":, "sist_endret":}} – kun
+    denne personens egne vurderinger, til redigeringsvisningen."""
+    return {
+        (r["butikk"], r["kriterium"]): {"score": r["score"], "kommentar": r["kommentar"], "sist_endret": r["sist_endret"]}
+        for r in rader if r["jurymedlem"] == jurymedlem
+    }
+
+
+def snitt_delt_kriterium(gruppert: dict, butikk: str, kriterium: str):
+    """Snitt blant ALLE jurymedlemmer som har vurdert dette kriteriet for
+    butikken (N/A telles ikke med) – den offisielle kriterie-scoren når
+    flere deler kriteriet."""
+    oppforinger = gruppert.get((butikk, kriterium), [])
+    tall = [float(s) for _, s, _, _ in oppforinger if er_tall(s)]
+    return (sum(tall) / len(tall)) if tall else None
