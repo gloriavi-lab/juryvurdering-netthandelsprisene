@@ -14,11 +14,11 @@ from datetime import datetime
 
 import streamlit as st
 
-from components import fremdriftslinje, klasse_badge, lagringsstatus, topptekst, tom_tilstand
+from components import fremdriftslinje, klasse_badge, lagringsstatus, status_merkelapp_html, topptekst, tom_tilstand
 from data import IKKE_VURDERT, er_tall, grupper_vurderinger, mine_scorer, snitt_delt_kriterium, status_for_scorer
 from jury import aktive_kriterier, beskriv_tildeling, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
 from sheets import read_generelle_kommentarer, read_stores, read_vurderinger, upsert_generell_kommentar, upsert_vurdering
-from theme import FAGFELT_FARGE
+from theme import FAGFELT_FARGE, STATUS_FARGE, STATUS_TEKST, STATUS_TONE
 
 topptekst("Vurdering")
 
@@ -109,12 +109,17 @@ def har_kommentar(navn):
 
 antall_ferdig = sum(1 for n in navn_liste_butikker if status(n) == "Ferdig")
 antall_pabegynt = sum(1 for n in navn_liste_butikker if status(n) == "Påbegynt")
+antall_gjenstar = len(navn_liste_butikker) - antall_ferdig - antall_pabegynt
 
-fremdriftslinje(
-    (antall_ferdig / len(navn_liste_butikker)) if navn_liste_butikker else 0,
-    f"{antall_ferdig} av {len(navn_liste_butikker)} butikker ferdig · {antall_pabegynt} påbegynt",
-)
-st.write("")
+
+def _neste_anbefalt():
+    """Neste PÅBEGYNTE butikk (fortsett der du slapp) – ellers neste
+    IKKE STARTEDE, alfabetisk. None hvis alt er ferdig."""
+    pabegynte = sorted(n for n in navn_liste_butikker if status(n) == "Påbegynt")
+    if pabegynte:
+        return pabegynte[0]
+    gjenstaende = sorted(n for n in navn_liste_butikker if status(n) == "Ikke startet")
+    return gjenstaende[0] if gjenstaende else None
 
 
 def _nullstill_butikk_state(navn):
@@ -125,6 +130,43 @@ def _nullstill_butikk_state(navn):
         for prefiks in ("seg_", "kom_krit_"):
             st.session_state.pop(f"{prefiks}{navn}_{k}", None)
     st.session_state.pop(f"generell_{navn}", None)
+
+
+def _bytt_til(navn):
+    forrige = st.session_state.get("_sist_vist_butikk")
+    if forrige != navn:
+        _nullstill_butikk_state(navn)
+        st.session_state["_sist_vist_butikk"] = navn
+    st.session_state["_apnet_butikk"] = navn
+
+
+# ── Tre statuskort + grønn fremdriftslinje ──
+status_kort = []
+for s_navn, antall in [("Ikke startet", antall_gjenstar), ("Påbegynt", antall_pabegynt), ("Ferdig", antall_ferdig)]:
+    farge, tone, tekst = STATUS_FARGE[s_navn], STATUS_TONE[s_navn], STATUS_TEKST[s_navn]
+    status_kort.append(
+        f'<div class="rutenett-kort" style="background:{tone};border-top-color:{farge};">'
+        f'<div class="stor-tall" style="color:{farge};">{antall}</div><div style="font-weight:700;">{tekst}</div></div>'
+    )
+st.markdown(f'<div class="rutenett tre-per-rad">{"".join(status_kort)}</div>', unsafe_allow_html=True)
+st.write("")
+fremdriftslinje((antall_ferdig / len(navn_liste_butikker)) if navn_liste_butikker else 0, f"{antall_ferdig} av {len(navn_liste_butikker)} ferdig")
+st.write("")
+
+# ── Handlingskort: fortsett der du slapp (kun på listevisningen) ──
+if not st.session_state.get("_apnet_butikk"):
+    _neste_navn = _neste_anbefalt()
+    if _neste_navn:
+        neste_info = butikker[_neste_navn]
+        with st.container(border=True):
+            ac1, ac2 = st.columns([3, 1])
+            ac1.markdown(f"**Neste butikk:** {_neste_navn} ({neste_info.get('klasse', '–')})")
+            if ac2.button("Start vurdering →", type="primary", use_container_width=True):
+                _bytt_til(_neste_navn)
+                st.rerun()
+    else:
+        st.success("🎉 Du har vurdert alle dine butikker!", icon=":material/celebration:")
+    st.write("")
 
 
 def lagre_denne(navn):
@@ -183,14 +225,6 @@ def _gyldig_status_tekst(navn):
     return {"Ferdig": "✅ Ferdig", "Påbegynt": "◐ Påbegynt", "Ikke startet": "○ Ikke startet"}[s]
 
 
-def _bytt_til(navn):
-    forrige = st.session_state.get("_sist_vist_butikk")
-    if forrige != navn:
-        _nullstill_butikk_state(navn)
-        st.session_state["_sist_vist_butikk"] = navn
-    st.session_state["_apnet_butikk"] = navn
-
-
 @st.fragment
 def vis_vurderingsvisning():
     navn = st.session_state.get("_apnet_butikk")
@@ -200,7 +234,7 @@ def vis_vurderingsvisning():
     info = butikker[navn]
     i = navn_liste_butikker.index(navn)
 
-    if st.button("← Tilbake til lista", icon=":material/arrow_back:"):
+    if st.button("← Alle mine butikker", icon=":material/arrow_back:"):
         st.session_state["_apnet_butikk"] = None
         st.rerun(scope="fragment")
         return
@@ -284,50 +318,96 @@ def vis_vurderingsvisning():
         st.rerun(scope="fragment")
     if a2.button("💾 Lagre og neste", type="primary", use_container_width=True):
         if lagre_denne(navn):
+            st.toast("Lagret ✓", icon=":material/check_circle:")
             _bytt_til(neste_uferdige(navn) or navn)
             st.rerun(scope="fragment")
         else:
             st.rerun(scope="fragment")
 
 
-def vis_butikkliste():
-    """Bruker ÉN st.dataframe med klikk-på-rad, ikke ett eget knapp+boks per
-    butikk (opptil 111 stykker) – det siste gjorde siden tung nok til at det
-    kunne føles helt fastlåst/uresponsiv (sannsynlig årsak til at vurdering
-    sluttet å fungere etter forrige runde)."""
-    sok = st.text_input("Søk", placeholder="Søk etter butikk …", icon=":material/search:", label_visibility="collapsed")
-    fc1, fc2 = st.columns([2, 1])
-    status_filter = fc1.multiselect("Status", ["Ikke startet", "Påbegynt", "Ferdig"], placeholder="Alle statuser", label_visibility="collapsed")
-    kun_uferdige = fc2.checkbox("Vis kun ikke ferdige")
+FANE_STATUS = {"gjenstar": "Ikke startet", "pabegynt": "Påbegynt", "ferdig": "Ferdig", "alle": None}
+FANE_REKKEFOLGE = {"Påbegynt": 0, "Ikke startet": 1, "Ferdig": 2}
 
-    rader, navn_for_rad = [], []
-    for navn in navn_liste_butikker:
-        if sok and sok.lower() not in navn.lower():
-            continue
+
+def vis_butikkliste():
+    """Oppgaveliste-stil: faner (persistert via segmented_control – st.tabs
+    hopper tilbake til første fane ved enhver rerun, så det duger ikke når
+    man skal huske hvor brukeren stod). Paginert med «Vis flere» i stedet for
+    én rad/knapp per butikk for alle 111 på én gang – det var den forrige,
+    reelle ytelsesbuggen."""
+    fane_valg = [("gjenstar", f"Gjenstår ({antall_gjenstar})"), ("pabegynt", f"Påbegynt ({antall_pabegynt})"), ("ferdig", f"Ferdig ({antall_ferdig})"), ("alle", "Alle")]
+    fc1, fc2 = st.columns([3, 2])
+    with fc1:
+        fane = st.segmented_control(
+            "Fane", [v for v, _ in fane_valg], key="_vurdering_fane", default="gjenstar",
+            format_func=dict(fane_valg).get, label_visibility="collapsed",
+        )
+    with fc2:
+        sok = st.text_input("Søk", placeholder="Søk etter butikk …", icon=":material/search:", label_visibility="collapsed")
+
+    # Nullstill paginering når fane/søk faktisk ENDRES (ikke når man bare går
+    # tilbake til lista igjen – da skal man stå på samme «posisjon»).
+    nokkel = (fane, sok)
+    if st.session_state.get("_vurdering_forrige_filter") != nokkel:
+        st.session_state["_vurdering_vis_antall"] = 20
+        st.session_state["_vurdering_forrige_filter"] = nokkel
+    vis_antall = st.session_state.get("_vurdering_vis_antall", 20)
+
+    onsket_status = FANE_STATUS.get(fane, "Ikke startet")
+    navn_filtrert = [n for n in navn_liste_butikker if (onsket_status is None or status(n) == onsket_status)]
+    if sok:
+        navn_filtrert = [n for n in navn_filtrert if sok.lower() in n.lower()]
+    navn_filtrert.sort(key=lambda n: (FANE_REKKEFOLGE.get(status(n), 9), n))
+
+    st.write("")
+    if not navn_filtrert:
+        tom_tekst = {
+            "gjenstar": "Ingen gjenstående butikker 🎉", "pabegynt": "Ingen påbegynte butikker",
+            "ferdig": "Ingen ferdige butikker ennå", "alle": "Ingen butikker matcher søket",
+        }
+        if fane == "alle" and not sok:
+            tom_tekst["alle"] = "Alt er ferdig vurdert 🎉" if antall_ferdig == len(navn_liste_butikker) else "Ingen butikker funnet"
+        st.caption(tom_tekst.get(fane, "Ingen treff"))
+        return
+
+    for navn in navn_filtrert[:vis_antall]:
         s = status(navn)
-        if status_filter and s not in status_filter:
-            continue
-        if kun_uferdige and s == "Ferdig":
-            continue
         info = butikker[navn]
         per_felt = status_per_fagfelt(navn)
-        rader.append({
-            "Butikk": navn, "Klasse": info.get("klasse", "–"),
-            "Status": _gyldig_status_tekst(navn),
-            "Mine kriterier": " · ".join(f"{b}/{t} {f[:3]}" for f, (b, t) in per_felt.items()),
-            "💬": "💬" if har_kommentar(navn) else "",
-            "Besøk": info.get("url", ""),
-        })
-        navn_for_rad.append(navn)
+        besvart_totalt = sum(b for b, _ in per_felt.values())
+        totalt_mine = sum(t for _, t in per_felt.values())
+        tooltip = " · ".join(f"{f}: {b}/{t}" for f, (b, t) in per_felt.items())
 
-    st.caption(f"{len(rader)} av {len(navn_liste_butikker)} butikker – klikk en rad for å vurdere")
-    hendelse = st.dataframe(
-        rader, hide_index=True, use_container_width=True, on_select="rerun", selection_mode="single-row",
-        column_config={"Besøk": st.column_config.LinkColumn("Besøk", display_text="Besøk →")},
-    )
-    if hendelse and hendelse.selection and hendelse.selection.rows:
-        _bytt_til(navn_for_rad[hendelse.selection.rows[0]])
-        st.rerun()
+        slug = "".join(ch for ch in navn.lower() if ch.isalnum()) or "butikk"
+        rad_nokkel = f"butikkrad_{'ferdig_' if s == 'Ferdig' else ''}{slug}"
+        with st.container(key=rad_nokkel, border=True):
+            c1, c2, c3, c4, c5 = st.columns([3, 1.3, 2, 1, 1.4])
+            with c1:
+                st.markdown(f'<div class="butikk-navn">{navn}</div><div class="butikk-bransje">{info.get("bransje", "–")}</div>', unsafe_allow_html=True)
+            with c2:
+                klasse_badge(info.get("klasse", "–"))
+            with c3:
+                st.markdown(f'<div class="butikk-fremdrift-tekst" title="{tooltip}">{besvart_totalt} av {totalt_mine} kriterier</div>', unsafe_allow_html=True)
+                st.markdown(status_merkelapp_html(s), unsafe_allow_html=True)
+            with c4:
+                if har_kommentar(navn):
+                    st.caption("💬")
+                if info.get("url"):
+                    st.link_button("Besøk ↗", info["url"], icon=":material/open_in_new:")
+            with c5:
+                if s == "Ferdig":
+                    if st.button("Endre", key=f"endre_{navn}", use_container_width=True):
+                        _bytt_til(navn)
+                        st.rerun()
+                else:
+                    if st.button("Vurder →", key=f"vurder_{navn}", type="primary", use_container_width=True):
+                        _bytt_til(navn)
+                        st.rerun()
+
+    if len(navn_filtrert) > vis_antall:
+        if st.button(f"Vis flere ({len(navn_filtrert) - vis_antall} igjen)", use_container_width=True):
+            st.session_state["_vurdering_vis_antall"] = vis_antall + 20
+            st.rerun()
 
 
 if st.session_state.get("_apnet_butikk"):

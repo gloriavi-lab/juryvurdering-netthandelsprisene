@@ -25,6 +25,8 @@ KLASSE_IKON = {"Liten": "🌱", "Medium": "🌿", "Stor": "🌳"}
 KLASSE_TONE = {"Liten": "#E7F3EC", "Medium": "#E6F0F5", "Stor": "#FBF1E0"}
 
 STATUS_FARGE = {"Ferdig": "#1E8E5A", "Påbegynt": "#C8A200", "Ikke startet": "#8A8780"}
+STATUS_TONE = {"Ferdig": "#E7F3EC", "Påbegynt": "#FBF1D6", "Ikke startet": "#F0EFEC"}
+STATUS_TEKST = {"Ferdig": "Ferdig", "Påbegynt": "Påbegynt", "Ikke startet": "Gjenstår"}
 
 # Radfarger per (Fase 1-)jurymedlem, hentet fra samme fil. Navnene her er
 # skrevet EKSAKT som i regnearkets "Jurymedlem"-kolonne i dag (bl.a. "Ole" og

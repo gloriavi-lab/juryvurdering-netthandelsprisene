@@ -158,6 +158,24 @@ div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px;
     .fase-rad {{ flex-direction:column; gap:10px; }}
     .fase-linje {{ display:none; }}
 }}
+
+/* Butikkliste på Vurdering – oppgaveliste-stil, ikke regneark */
+.status-merkelapp {{ display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:700; padding:3px 10px; border-radius:20px; white-space:nowrap; }}
+/* Hver butikkrad er en ekte st.container(key=..., border=True) – IKKE en rå
+   <div> åpnet i én st.markdown-kall og lukket i en annen, siden Streamlit
+   rendrer hvert st.*-kall som sitt eget, isolerte DOM-element: en uferdig
+   tag fra ett kall pakker ALDRI inn elementer fra senere kall. st.container
+   sin key= gir en ekte, stabil CSS-klasse (st-key-<key>) på den faktiske
+   wrapper-diven å style via. */
+div[class*="st-key-butikkrad_"] {{ transition: background-color .12s ease, box-shadow .12s ease; margin-bottom:10px; }}
+div[class*="st-key-butikkrad_"]:hover {{ box-shadow: 0 2px 10px rgba(0,0,0,0.06); }}
+div[class*="st-key-butikkrad_ferdig_"] {{ background: rgba(30,142,90,0.06); }}
+.butikk-navn {{ font-weight:700; font-size:15px; color:var(--tekst); }}
+.butikk-bransje {{ font-size:12.5px; color:var(--tekst-dempet); }}
+.butikk-fremdrift-tekst {{ font-size:12.5px; color:var(--tekst-dempet); }}
+@media (max-width: 640px) {{
+    div[class*="st-key-butikkrad_"] {{ padding:2px; }}
+}}
 </style>
 """
 

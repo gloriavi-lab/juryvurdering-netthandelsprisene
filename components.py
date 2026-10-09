@@ -42,6 +42,18 @@ def klasse_badge(klasse: str):
     st.markdown(f'<span class="klasse-badge">{klasse or "–"}</span>', unsafe_allow_html=True)
 
 
+def status_merkelapp_html(status: str) -> str:
+    """Returnerer rå HTML (sett inn i en f-string du selv skriver ut) – en
+    farget merkelapp med ikon, brukt i butikklisten på Vurdering. Bruker
+    enkle Unicode-tegn (ikke en ikonfont-klasse) – trygt uansett om
+    Material-fonten er lastet inn på siden eller ikke."""
+    from theme import STATUS_FARGE, STATUS_TEKST
+    farge = STATUS_FARGE.get(status, "#888")
+    tekst = STATUS_TEKST.get(status, status)
+    symbol = {"Ferdig": "✓", "Påbegynt": "◐", "Ikke startet": "○"}.get(status, "")
+    return f'<span class="status-merkelapp" style="background:{farge}1A;color:{farge};">{symbol} {tekst}</span>'
+
+
 def rutenett(kort_html_liste, tre_per_rad=False):
     """Tegner en liste med ferdig bygget indre-HTML som ETT samlet CSS-grid,
     slik at alle kortene i rutenettet garantert får lik bredde/høyde – også på
