@@ -291,11 +291,16 @@ def vis_vurderingsvisning():
 
 
 def vis_butikkliste():
+    """Bruker ÉN st.dataframe med klikk-på-rad, ikke ett eget knapp+boks per
+    butikk (opptil 111 stykker) – det siste gjorde siden tung nok til at det
+    kunne føles helt fastlåst/uresponsiv (sannsynlig årsak til at vurdering
+    sluttet å fungere etter forrige runde)."""
     sok = st.text_input("Søk", placeholder="Søk etter butikk …", icon=":material/search:", label_visibility="collapsed")
     fc1, fc2 = st.columns([2, 1])
     status_filter = fc1.multiselect("Status", ["Ikke startet", "Påbegynt", "Ferdig"], placeholder="Alle statuser", label_visibility="collapsed")
     kun_uferdige = fc2.checkbox("Vis kun ikke ferdige")
 
+    rader, navn_for_rad = [], []
     for navn in navn_liste_butikker:
         if sok and sok.lower() not in navn.lower():
             continue
@@ -305,23 +310,24 @@ def vis_butikkliste():
         if kun_uferdige and s == "Ferdig":
             continue
         info = butikker[navn]
-        with st.container(border=True):
-            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-            with c1:
-                if st.button(navn, key=f"apne_{navn}", icon=":material/chevron_right:", use_container_width=True):
-                    _bytt_til(navn)
-                    st.rerun()
-                klasse_badge(info.get("klasse", "–"))
-            with c2:
-                st.markdown(_gyldig_status_tekst(navn))
-                per_felt = status_per_fagfelt(navn)
-                st.caption(" · ".join(f"{b}/{t} {f[:3]}" for f, (b, t) in per_felt.items()))
-            with c3:
-                if har_kommentar(navn):
-                    st.caption("💬 Kommentert")
-            with c4:
-                if info.get("url"):
-                    st.link_button("Besøk", info["url"], icon=":material/open_in_new:", use_container_width=True)
+        per_felt = status_per_fagfelt(navn)
+        rader.append({
+            "Butikk": navn, "Klasse": info.get("klasse", "–"),
+            "Status": _gyldig_status_tekst(navn),
+            "Mine kriterier": " · ".join(f"{b}/{t} {f[:3]}" for f, (b, t) in per_felt.items()),
+            "💬": "💬" if har_kommentar(navn) else "",
+            "Besøk": info.get("url", ""),
+        })
+        navn_for_rad.append(navn)
+
+    st.caption(f"{len(rader)} av {len(navn_liste_butikker)} butikker – klikk en rad for å vurdere")
+    hendelse = st.dataframe(
+        rader, hide_index=True, use_container_width=True, on_select="rerun", selection_mode="single-row",
+        column_config={"Besøk": st.column_config.LinkColumn("Besøk", display_text="Besøk →")},
+    )
+    if hendelse and hendelse.selection and hendelse.selection.rows:
+        _bytt_til(navn_for_rad[hendelse.selection.rows[0]])
+        st.rerun()
 
 
 if st.session_state.get("_apnet_butikk"):
