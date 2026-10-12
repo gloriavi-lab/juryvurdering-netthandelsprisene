@@ -50,20 +50,22 @@ _STANDARD_KRITERIER_SEED = [
     ("Innovasjon", "Adopsjon av nye teknologier for styrke konkurransekraft", "Bruk av ny teknologi.", "Fase 2,Fase 3"),
     ("Innovasjon", "Kommersielt håndverk", "Generelt kommersielt håndverk.", "Fase 2,Fase 3"),
     ("Innovasjon", "Agentic commerce",
-     "Hvor godt butikken er rustet for at AI-assistenter og shoppingagenter kan finne, sammenligne og kjøpe produkter på vegne av kunden.",
+     "Hvor lett en kunde som starter i en AI-assistent (ChatGPT, Gemini e.l.) finner frem til og handler i butikken.",
      "Fase 3"),
 ]
 _AGENTIC_UTFYLLENDE = (
-    "Agentic commerce betyr at AI-agenter (f.eks. i ChatGPT, Gemini eller Perplexity) søker etter produkter, "
-    "sammenligner tilbud og i økende grad gjennomfører kjøpet for kunden. Butikker som stiller sterkt, har: "
-    "god og strukturert produktdata (komplette produktfeeder, schema.org-merking), maskinlesbar informasjon om "
-    "pris, lagerstatus, levering og retur, synlighet i AI-søk, og eventuelt støtte for nye protokoller for "
-    "agentkjøp eller en egen AI-shoppingassistent."
+    "Stadig flere starter handelen sin i en AI-chatbot i stedet for et tradisjonelt søkemotor eller direkte på "
+    "butikkens side. Dette kriteriet vurderer OVERGANGEN fra AI-assistenten til selve nettbutikken – ikke om "
+    "butikken har en egen AI-assistent: Blir kunden henvist med en fungerende, direkte lenke til riktig produkt "
+    "(ikke bare forsiden)? Stemmer pris, lagerstatus og produktinformasjon som AI-assistenten oppga med det "
+    "kunden faktisk møter i butikken? Er det en god opplevelse å fullføre kjøpet derfra, uten unødvendige "
+    "omveier? God, strukturert og oppdatert produktdata (f.eks. korrekte produktfeeder og schema.org-merking) "
+    "gjør det lettere for AI-tjenester å finne og henvise riktig til butikken i utgangspunktet."
 )
 _AGENTIC_SKALA = {
-    "Skala 1": "Lite strukturert data, vanskelig for agenter å lese.",
-    "Skala 3": "Godt strukturert produktdata og grunnleggende synlighet.",
-    "Skala 5": "Tydelig tilrettelagt for agenter, med strukturert data, synlighet i AI-søk og/eller agentbasert kjøp eller assistent.",
+    "Skala 1": "Vanskelig eller umulig å finne frem til riktig produkt ut fra det en AI-assistent anbefalte – f.eks. brutte lenker, feil pris/lagerstatus, eller ingen direkte vei til produktet.",
+    "Skala 3": "Mulig å finne frem, men med friksjon – noe sprik mellom det AI-assistenten oppga og det kunden møter, eller en omstendelig vei til kjøp.",
+    "Skala 5": "Sømløs overgang: kunden kommer direkte til riktig produkt med korrekt pris/lagerstatus, og kan fullføre kjøpet uten unødvendige omveier.",
 }
 _GENERISK_SKALA = {
     "Skala 1": "Svak – mangler i stor grad eller fungerer dårlig.",
@@ -87,7 +89,7 @@ _UNIVERSELL_UTFORMING_UTFYLLENDE = (
 FORESLATTE_TILLEGGSKRITERIER = [
     {
         "fagfelt": "Innovasjon", "kriterium": "Agentic commerce",
-        "kort": "Hvor godt butikken er rustet for at AI-assistenter og shoppingagenter kan finne, sammenligne og kjøpe produkter på vegne av kunden.",
+        "kort": "Hvor lett en kunde som starter i en AI-assistent (ChatGPT, Gemini e.l.) finner frem til og handler i butikken.",
         "utfyllende": _AGENTIC_UTFYLLENDE,
         "skala1": _AGENTIC_SKALA["Skala 1"], "skala3": _AGENTIC_SKALA["Skala 3"], "skala5": _AGENTIC_SKALA["Skala 5"],
         "eksempler": "", "faser": ["Fase 3"],
@@ -328,11 +330,11 @@ def beskriv_tildeling(navn: str, jury: dict, kriterier_per_felt: dict) -> str:
 # Veiledning
 # ─────────────────────────────────────────────
 _VEILEDNING_SEED = [
-    ["Vurder som en vanlig kunde", "Besøk butikken slik en vanlig kunde ville gjort – gjerne på både mobil og PC, siden opplevelsen ofte er ulik. Du trenger ikke handle noe for å vurdere."],
+    ["Vurder som en vanlig kunde", "Besøk butikken slik en vanlig kunde ville gjort. Test på MOBIL er primært og et krav – PC er en ekstra bonus, ikke et krav. Det er et krav at nettbutikken er mobiltilpasset; dårlig mobiltilpasning skal trekke ned vurderingen. Du trenger ikke handle noe for å vurdere."],
     ["Skalaen 1–5", "1 = svak, under forventet nivå for en nettbutikk i denne klassen. 3 = middels, fungerer greit men har tydelig forbedringspotensial. 5 = utmerket, blant de beste i konkurransen på dette punktet. Se også skala-forklaringen under hvert enkelt kriterium."],
     ["«Kan ikke vurdere»", "Brukes når kriteriet rett og slett ikke lar seg bedømme for denne butikken (f.eks. en funksjon som ikke finnes eller ikke er relevant for bransjen) – ikke som en snarvei når du er usikker. Da bruker du heller midten av skalaen og skriver hvorfor i kommentarfeltet."],
-    ["Begrunnelse", "Skriv alltid en kort kommentar ved 1 eller 5 – det gjør resultatet lettere å etterprøve og diskutere i juryen. Ved 2–4 er det valgfritt, men ofte nyttig."],
-    ["Inhabilitet", "Har du en tilknytning til butikken (ansatt, eier, nær relasjon, oppdrag for dem e.l.), skal du ikke vurdere den – meld fra til juryleder, så blir den omfordelt."],
+    ["Begrunnelse", "Kommentar er påkrevd ved karakter 1, 2 og 3 – lagringen stoppes uten den. Kommentarene brukes i tilbakemeldingen til finalistene, så gode kommentarer er ønsket også ved 4 og 5."],
+    ["Inhabilitet", "Har du en tilknytning til butikken (ansatt, eier, nær relasjon, oppdrag for dem e.l.), skal du ikke vurdere den – meld fra til oss (administrasjonen), uten å oppgi navn i kommentarfelt eller andre åpne felt."],
 ]
 
 
@@ -344,6 +346,44 @@ def read_veiledning(_sh):
         read_veiledning.clear()
         return ws.get_all_records()
     return ws.get_all_records()
+
+
+# Oppdaterte tekster (avtalt i en senere runde enn da _VEILEDNING_SEED sist
+# ble skrevet inn i et allerede eksisterende, levende Veiledning-ark –
+# _VEILEDNING_SEED over kjører kun ved førstegangsoppretting). Samme
+# overskrift-nøkler som _VEILEDNING_SEED – brukes til å tilby en oppdatering
+# av eksisterende rader i Innstillinger, i stedet for å gjette på om
+# admin vil ha dem overskrevet stille.
+_VEILEDNING_OPPDATERINGER = {
+    "Vurder som en vanlig kunde": _VEILEDNING_SEED[0][1],
+    "Begrunnelse": _VEILEDNING_SEED[3][1],
+    "Inhabilitet": _VEILEDNING_SEED[4][1],
+}
+
+
+def manglende_veiledning_oppdateringer(_sh):
+    """De av _VEILEDNING_OPPDATERINGER som faktisk avviker fra teksten i det
+    levende Veiledning-arket akkurat nå – {overskrift: (gammel, ny)}."""
+    eksisterende = {r.get("Overskrift"): r.get("Tekst", "") for r in read_veiledning(_sh)}
+    return {
+        overskrift: (eksisterende.get(overskrift, "(finnes ikke ennå)"), ny)
+        for overskrift, ny in _VEILEDNING_OPPDATERINGER.items()
+        if eksisterende.get(overskrift, "") != ny
+    }
+
+
+def oppdater_veiledning_rad(sh, overskrift, ny_tekst):
+    """Oppdaterer TEKST-cellen for raden som matcher overskriften, eller
+    legger til raden hvis den ikke finnes fra før."""
+    ws = hent_eller_lag_fane(sh, VEILEDNING_FANE, VEILEDNING_HEADER)
+    rader = ws.get_all_values()
+    for i, rad in enumerate(rader[1:] if len(rader) > 1 else [], start=2):
+        if len(rad) >= 1 and rad[0] == overskrift:
+            ws.update([[ny_tekst]], range_name=f"B{i}")
+            read_veiledning.clear()
+            return
+    ws.append_row([overskrift, ny_tekst])
+    read_veiledning.clear()
 
 
 # ─────────────────────────────────────────────

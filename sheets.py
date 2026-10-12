@@ -41,7 +41,7 @@ import gspread
 import streamlit as st
 from google.oauth2.service_account import Credentials
 
-from data import FAGFELT, IKKE_VURDERT, KRITERIER_PER_FAGFELT, grupper_vurderinger, naa_norsk, offisiell_celleverdi
+from data import FAGFELT, IKKE_VURDERT, KRITERIER_PER_FAGFELT, grupper_vurderinger, naa_norsk, normalize_score, offisiell_celleverdi
 
 FASE1_FANE = "Rangering juryvurdering"  # tidligere "Rangering fase 1" – omdøpt etter avtale (ny fase-nummerering, se jury.py/Faser-fanen)
 FASE2_FANE = "Rangering ekspertvurdering"  # tidligere "Rangering fase 2"
@@ -843,7 +843,15 @@ def upsert_vurdering(sh, butikk, jurymedlem, fagfelt, kriterium, score, kommenta
 
     tidsstempel = naa_norsk().strftime("%Y-%m-%d %H:%M")
     if score:
-        verdier = [butikk, jurymedlem, fagfelt, kriterium, str(score), kommentar or "", tidsstempel]
+        # Skriv scoren som en EKTE Python int/float når den er numerisk, ikke
+        # en streng – en verdi som allerede er et JSON-tall trenger ingen
+        # "tolkning" (det er det value_input_option RAW/USER_ENTERED gjelder,
+        # kun for strenger), så den lagres som et TALL i Sheets uansett.
+        # IKKE_VURDERT forblir tekst (den er ikke numerisk). Kun selve
+        # verditypen endres her – skrive-mekanikken ellers er urørt.
+        normalisert_score = normalize_score(score)
+        lagret_score = normalisert_score if normalisert_score is not None else score
+        verdier = [butikk, jurymedlem, fagfelt, kriterium, lagret_score, kommentar or "", tidsstempel]
         if rad_nr:
             ws.update([verdier], range_name=f"A{rad_nr}:G{rad_nr}")
         else:
@@ -1066,13 +1074,143 @@ def fane_oversikt(sh):
 
 
 def merk_som_arkiv(sh, fane_navn):
-    """Gir fanen prefikset «ARKIV – » i tittelen – endrer INGENTING annet
-    (ingen data, ingen formatering, slettes ikke). Kalles kun fra
-    Innstillinger, kun for faner fane_oversikt() selv har merket som
-    "Ukjent" – rører aldri en fane appen faktisk bruker."""
+    """Gir fanen prefikset «ARKIV – » i tittelen OG flytter den sist blant
+    fanene – endrer INGENTING annet (ingen data, ingen formatering, slettes
+    ikke). Kalles kun fra Innstillinger, kun for faner fane_oversikt() selv
+    har merket som "Ukjent" – rører aldri en fane appen faktisk bruker."""
     if fane_navn.startswith("ARKIV – "):
         return fane_navn
     ws = sh.worksheet(fane_navn)
     nytt_navn = f"ARKIV – {fane_navn}"[:99]
     ws.update_title(nytt_navn)
+    flytt_fane_til_slutt(sh, nytt_navn)
     return nytt_navn
+
+
+def flytt_fane_til_slutt(sh, fane_navn):
+    """Flytter fanen til siste posisjon blant fanene i regnearket – endrer
+    kun rekkefølgen, ingen data/formatering."""
+    ws = sh.worksheet(fane_navn)
+    siste_indeks = len(sh.worksheets())  # Sheets API klemmer til faktisk siste plass uansett
+    ws.spreadsheet.batch_update({"requests": [{
+        "updateSheetProperties": {"properties": {"sheetId": ws.id, "index": siste_indeks}, "fields": "index"}
+    }]})
+
+
+def flytt_fane_til_forst(sh, fane_navn):
+    """Flytter fanen til FØRSTE posisjon – brukt til å gi den aktive fanen
+    («Rangering ekspertvurdering») en tydelig, fremtredende plass."""
+    ws = sh.worksheet(fane_navn)
+    ws.spreadsheet.batch_update({"requests": [{
+        "updateSheetProperties": {"properties": {"sheetId": ws.id, "index": 0}, "fields": "index"}
+    }]})
+
+
+def sjekk_gammel_fane_for_orphan_data(sh, gammel_fane_navn):
+    """Sjekker om en fane med dette navnet finnes SOM EN EGEN FANE (adskilt
+    fra FASE1_FANE/FASE2_FANE) og i så fall om den inneholder kriterie-
+    scorer som IKKE finnes i «Vurderinger»-loggen for noe jurymedlem ennå –
+    altså data som ville forsvinne fra det jury faktisk ser hvis fanen ble
+    arkivert/ignorert. Rører INGENTING, kun lesing. Returnerer None hvis
+    fanen ikke finnes (ingenting å bekymre seg for)."""
+    if gammel_fane_navn in (FASE1_FANE, FASE2_FANE):
+        return None
+    try:
+        ws = sh.worksheet(gammel_fane_navn)
+    except gspread.WorksheetNotFound:
+        return None
+
+    grunn, krit, _ = _header_data(ws)
+    butikker_i_fane, _ = _les_butikkliste(ws, grunn)
+    rader = ws.get_all_values()
+    dekket = {(r["butikk"], r["kriterium"]) for r in read_vurderinger(sh)}
+
+    orphans = []
+    for navn, info in butikker_i_fane.items():
+        rad_nr = info["rad"]
+        if rad_nr > len(rader):
+            continue
+        rad = rader[rad_nr - 1]
+        for (fagfelt, kriterium), kol in krit.items():
+            if len(rad) >= kol and rad[kol - 1] and (navn, kriterium) not in dekket:
+                orphans.append({"butikk": navn, "fagfelt": fagfelt, "kriterium": kriterium, "rå_verdi": rad[kol - 1]})
+    return {"fane": gammel_fane_navn, "antall_butikker_i_fane": len(butikker_i_fane), "orphans": orphans}
+
+
+def migrer_orphan_fane(sh, gammel_fane_navn):
+    """Flytter orphan-dataen sjekk_gammel_fane_for_orphan_data() fant inn i
+    BÅDE «Vurderinger»-loggen (jurymedlem="Ukjent (migrert fra <fane>)") OG
+    den aktive fargede fanen – bruker samme offisiell_celleverdi-regel som
+    vanlig lagring. Tar sikkerhetskopi av ALT først. Rører aldri den gamle
+    fanen selv (den kan arkiveres separat med merk_som_arkiv etterpå)."""
+    resultat = sjekk_gammel_fane_for_orphan_data(sh, gammel_fane_navn)
+    if not resultat or not resultat["orphans"]:
+        return {"backup": [], "antall_migrert": 0, "antall_butikker": 0, "feilet": []}
+
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+    tidsstempel = naa_norsk().strftime("%Y-%m-%d %H:%M")
+    jurymedlem_merke = f"Ukjent (migrert fra {gammel_fane_navn})"
+    for o in resultat["orphans"]:
+        upsert_vurdering(sh, o["butikk"], jurymedlem_merke, o["fagfelt"], o["kriterium"], o["rå_verdi"], "")
+
+    alle = read_vurderinger(sh)
+    gruppert = grupper_vurderinger(alle)
+    per_butikk = {}
+    for o in resultat["orphans"]:
+        verdi, notat = offisiell_celleverdi(gruppert.get((o["butikk"], o["kriterium"]), []))
+        if verdi is not None:
+            per_butikk.setdefault(o["butikk"], []).append((o["fagfelt"], o["kriterium"], verdi, notat))
+    feilet = []
+    antall_butikker_ok = 0
+    for butikk, jobb in per_butikk.items():
+        try:
+            skriv_mange_til_farget_fane(sh, butikk, jobb)
+            antall_butikker_ok += 1
+        except Exception as e:
+            # Data er allerede trygt i Vurderinger-loggen uansett (se over) –
+            # en butikk som ikke lenger finnes i den aktive fargede fanen
+            # skal ikke få HELE migreringen til å krasje og miste resten.
+            feilet.append(f"«{butikk}»: {e}")
+
+    return {
+        "backup": backup_navn, "antall_migrert": len(resultat["orphans"]), "antall_butikker": antall_butikker_ok,
+        "feilet": feilet,
+    }
+
+
+def konverter_scorer_til_tall(sh):
+    """Konverterer eksisterende TEKST-scorer («5») til ekte tall, i BÅDE den
+    fargede fanen og «Vurderinger»-loggen. Idempotent og trygt å kjøre flere
+    ganger – en celle som allerede er et tall skrives bare tilbake uendret.
+    IKKE_VURDERT-teksten røres aldri. Tar sikkerhetskopi først."""
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+
+    ws = _sikre_fase2_fane(sh)
+    grunn, krit, _ = _header_data(ws)
+    rader = ws.get_all_values()
+    oppdateringer = []
+    for r in range(FORSTE_DATARAD, len(rader) + 1):
+        rad = rader[r - 1]
+        for (_, _), kol in krit.items():
+            if len(rad) >= kol and rad[kol - 1]:
+                verdi = normalize_score(rad[kol - 1])
+                if isinstance(verdi, (int, float)):
+                    oppdateringer.append({"range": gspread.utils.rowcol_to_a1(r, kol), "values": [[verdi]]})
+    if oppdateringer:
+        ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
+    _rå_formatert.clear()
+    read_ratings.clear()
+
+    ws2 = _sikre_enkel_fane_med_header(sh, VURDERINGER_FANE, VURDERINGER_HEADER2)
+    rader2 = ws2.get_all_values()
+    oppdateringer2 = []
+    for i, rad in enumerate(rader2[1:] if len(rader2) > 1 else [], start=2):
+        if len(rad) >= 5 and rad[4]:
+            verdi = normalize_score(rad[4])
+            if isinstance(verdi, (int, float)):
+                oppdateringer2.append({"range": f"E{i}", "values": [[verdi]]})
+    if oppdateringer2:
+        ws2.batch_update(oppdateringer2, value_input_option="USER_ENTERED")
+    read_vurderinger.clear()
+
+    return {"backup": backup_navn, "antall_farget_fane": len(oppdateringer), "antall_vurderinger": len(oppdateringer2)}

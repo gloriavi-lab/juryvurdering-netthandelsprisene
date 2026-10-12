@@ -8,15 +8,16 @@ import streamlit as st
 from components import status_prikk, topptekst
 from jury import (
     add_criterion, aktive_kriterier, aktiv_fase, deaktiver_kriterium, fagfelt_liste, kriterier_per_fagfelt,
-    manglende_foreslatte_kriterier, mine_kriterier, oppdater_kriterium, read_criteria, read_faser, read_jury,
-    sett_gjeldende_fase, slett_jurymedlem, write_jury,
+    manglende_foreslatte_kriterier, manglende_veiledning_oppdateringer, mine_kriterier, oppdater_kriterium,
+    oppdater_veiledning_rad, read_criteria, read_faser, read_jury, sett_gjeldende_fase, slett_jurymedlem, write_jury,
 )
 from sheets import (
     FASE1_FANE, FASE2_FANE, er_finale_last, fane_oversikt, feilsok_farget_fane, feilsok_vurdering, finale_las_info,
-    fjern_finale_las, KOMMENTARER_FANE, legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, merk_som_arkiv,
-    migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane, read_fase1_scores, read_ratings, read_stores,
-    read_vurderinger, sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner, test_tilkobling,
-    VURDERINGER_FANE,
+    fjern_finale_las, flytt_fane_til_forst, konverter_scorer_til_tall, KOMMENTARER_FANE, legg_til_kriterium_kolonne,
+    legg_til_na_i_datavalidering, merk_som_arkiv, migrer_orphan_fane, migrer_til_vurderinger_fane,
+    migrer_vurderinger_til_farget_fane, read_fase1_scores, read_ratings, read_stores, read_vurderinger,
+    sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner, sjekk_gammel_fane_for_orphan_data,
+    test_tilkobling, VURDERINGER_FANE,
 )
 from theme import FAGFELT_FARGE
 
@@ -194,6 +195,39 @@ if st.session_state.get("_migrering_resultat"):
     st.success(f"Ferdig! {r['detaljer']}", icon=":material/check_circle:")
     st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
 
+with st.expander("Konverter tekst-scorer til tall", icon=":material/pin:"):
+    st.caption(
+        f"Tidligere runder lagret enkelte scorer som TEKST («5») i stedet for ekte tall – dette skriver dem "
+        f"om til tall, i både «{FASE2_FANE}» og «{VURDERINGER_FANE}». Trygt å kjøre flere ganger (en celle "
+        "som allerede er et tall røres ikke i praksis). «Kan ikke vurdere» røres aldri."
+    )
+    if st.button("Konverter nå", icon=":material/pin:"):
+        st.session_state["_vis_konverter_dialog"] = True
+
+
+@st.dialog("Konvertere tekst-scorer til tall?")
+def konverter_dialog():
+    st.write(f"Tar sikkerhetskopi av alt først, leser deretter gjennom alle kriterie-celler i «{FASE2_FANE}» og Score-kolonnen i «{VURDERINGER_FANE}», og skriver tallverdier tilbake der det finnes en gyldig score.")
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True, key="avbryt_konverter"):
+        st.rerun()
+    if c2.button("Ja, konverter nå", type="primary", use_container_width=True, icon=":material/pin:", key="bekreft_konverter"):
+        with st.spinner("Sikkerhetskopierer og konverterer …"):
+            resultat = konverter_scorer_til_tall(sh)
+        st.session_state["_konverter_resultat"] = resultat
+        st.rerun()
+
+
+if st.session_state.get("_vis_konverter_dialog"):
+    st.session_state["_vis_konverter_dialog"] = False
+    konverter_dialog()
+
+if st.session_state.get("_konverter_resultat"):
+    r = st.session_state.pop("_konverter_resultat")
+    st.success(f"Ferdig! {r['antall_farget_fane']} celler i «{FASE2_FANE}», {r['antall_vurderinger']} i «{VURDERINGER_FANE}».", icon=":material/check_circle:")
+    st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
+    st.caption("Sjekk at eventuelle snitt-/formelkolonner i regnearket regner riktig etter konverteringen.")
+
 st.divider()
 st.subheader("Kommentar-oversikt", anchor=False)
 st.caption(
@@ -248,6 +282,14 @@ if faner:
         [{"Fane": f["navn"], "Status": f["status"], "Forklaring": f["forklaring"]} for f in faner],
         hide_index=True, use_container_width=True,
     )
+    if st.button(f"Flytt «{FASE2_FANE}» (aktiv) først", icon=":material/arrow_upward:"):
+        try:
+            flytt_fane_til_forst(sh, FASE2_FANE)
+            st.toast("Flyttet.", icon=":material/check_circle:")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Kunne ikke flytte fanen: {e}", icon=":material/error:")
+
     kandidater = [f["navn"] for f in faner if f["kan_arkiveres"]]
     if kandidater:
         valgte = st.multiselect(f"Merk valgte som «ARKIV – »", kandidater, key="_arkiver_valgte")
@@ -261,6 +303,37 @@ if faner:
             if merket:
                 st.success(f"Merket: {', '.join(merket)}", icon=":material/check_circle:")
                 st.rerun()
+
+    # «Rangering fase 2» er det GAMLE navnet på «Rangering ekspertvurdering»
+    # (se sheets._GAMLE_NAVN) – men siden den aktive fanen allerede finnes
+    # under sitt nye navn, blir en eventuell SEPARAT, gjenglemt fane med det
+    # gamle navnet ALDRI oppdaget/slått sammen automatisk. Sjekk eksplisitt.
+    _gammel_fane_navn = "Rangering fase 2"
+    if any(f["navn"] == _gammel_fane_navn for f in faner):
+        try:
+            _orphan_sjekk = sjekk_gammel_fane_for_orphan_data(sh, _gammel_fane_navn)
+        except Exception as e:
+            _orphan_sjekk = None
+            st.error(f"Kunne ikke sjekke «{_gammel_fane_navn}»: {e}", icon=":material/error:")
+        if _orphan_sjekk:
+            if _orphan_sjekk["orphans"]:
+                st.warning(
+                    f"«{_gammel_fane_navn}» finnes som en EGEN fane (ikke samme som «{FASE2_FANE}») og inneholder "
+                    f"{len(_orphan_sjekk['orphans'])} verdier som IKKE finnes i «{VURDERINGER_FANE}» ennå – disse "
+                    "ville forsvunnet fra det jury ser hvis fanen bare ble arkivert.",
+                    icon=":material/warning:",
+                )
+                if st.button(f"Flytt disse {len(_orphan_sjekk['orphans'])} verdiene inn i «{FASE2_FANE}» og «{VURDERINGER_FANE}»", icon=":material/move_up:"):
+                    with st.spinner("Sikkerhetskopierer og flytter …"):
+                        res = migrer_orphan_fane(sh, _gammel_fane_navn)
+                    st.success(f"Flyttet {res['antall_migrert']} verdier for {res['antall_butikker']} butikker.", icon=":material/check_circle:")
+                    st.caption(f"Sikkerhetskopier: {', '.join(res['backup'])}")
+                    if res["feilet"]:
+                        with st.expander(f"{len(res['feilet'])} butikk(er) kunne ikke skrives til den fargede fanen"):
+                            for feil in res["feilet"]:
+                                st.markdown(f"- {feil}")
+            else:
+                st.success(f"«{_gammel_fane_navn}» finnes, men inneholder ingen verdier som mangler i «{VURDERINGER_FANE}» – trygt å arkivere over (se listen over).", icon=":material/check_circle:")
 
 st.divider()
 with st.expander(f"Opprett «{FASE2_FANE}» manuelt", icon=":material/content_copy:"):
@@ -283,6 +356,29 @@ with st.expander(f"Opprett «{FASE2_FANE}» manuelt", icon=":material/content_co
     if st.button("Legg til nå", icon=":material/playlist_add_check:"):
         legg_til_na_i_datavalidering(sh)
         st.success("Lagt til.", icon=":material/check_circle:")
+
+st.divider()
+st.subheader("Veiledningstekst («Hvordan bedømme»)", anchor=False)
+try:
+    manglende_veiledning = manglende_veiledning_oppdateringer(sh)
+except Exception as e:
+    manglende_veiledning = {}
+    st.error(f"Kunne ikke lese veiledningen: {e}", icon=":material/error:")
+
+if not manglende_veiledning:
+    st.success("Veiledningsteksten er oppdatert.", icon=":material/check_circle:")
+else:
+    st.warning(f"{len(manglende_veiledning)} tekst(er) avviker fra siste godkjente ordlyd.", icon=":material/warning:")
+    for overskrift, (gammel, ny) in manglende_veiledning.items():
+        with st.expander(f"«{overskrift}»"):
+            st.caption("Nåværende:")
+            st.caption(gammel or "_(tom)_")
+            st.caption("Foreslått:")
+            st.markdown(ny)
+            if st.button(f"Oppdater «{overskrift}»", key=f"oppdater_veiledning_{overskrift}"):
+                oppdater_veiledning_rad(sh, overskrift, ny)
+                st.toast("Oppdatert", icon=":material/check_circle:")
+                st.rerun()
 
 st.divider()
 st.subheader("Jury og kriterier", anchor=False)

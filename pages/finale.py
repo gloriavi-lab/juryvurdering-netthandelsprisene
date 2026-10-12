@@ -8,8 +8,8 @@ import io
 import streamlit as st
 
 from components import klasse_badge, topptekst
-from data import KLASSER, er_tall, snitt_av_scorer, status_for_scorer
-from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, read_criteria
+from data import KLASSER, er_tall, normalize_score, snitt_av_scorer, status_for_scorer
+from jury import aktive_kriterier, aktiv_fase, fagfelt_liste, kriterier_per_fagfelt, read_criteria, read_faser
 from sheets import er_finale_last, finale_las_info, hent_finale_snapshot, las_finale, read_ratings, read_stores
 
 topptekst("Finale")
@@ -17,6 +17,23 @@ topptekst("Finale")
 sh = st.session_state.get("_sh")
 if not sh:
     st.warning("Google Sheets-tilkoblingen mangler – gå til **Innstillinger**.", icon=":material/cloud_off:")
+    st.stop()
+
+try:
+    _gjeldende = aktiv_fase(read_faser(sh))
+except Exception:
+    _gjeldende = None
+if not _gjeldende or _gjeldende.get("Navn") != "Finale":
+    st.markdown(
+        '<span style="background:#F0EFEC;color:#8A8780;font-weight:700;padding:3px 10px;border-radius:20px;font-size:13px;">⏳ Kommende</span>',
+        unsafe_allow_html=True,
+    )
+    st.write("")
+    st.markdown(
+        "Her kåres de beste butikkene i hver størrelsesklasse, basert på snitt av ekspertvurderingen. "
+        "Rangeringen og låse-funksjonen blir tilgjengelig når gjeldende fase settes til **Finale** i "
+        "Innstillinger → Fasestatus."
+    )
     st.stop()
 
 kriterier_fase3 = aktive_kriterier(read_criteria(sh), fase="Fase 3")
@@ -61,7 +78,7 @@ if låst:
 
 def snitt_og_antall(navn):
     scorer = rating_data.get(navn, {}).get("scorer", {})
-    tall = [float(s) for s in scorer.values() if er_tall(s)]
+    tall = [normalize_score(s) for s in scorer.values() if er_tall(s)]
     return (sum(tall) / len(tall), len(tall)) if tall else (None, 0)
 
 

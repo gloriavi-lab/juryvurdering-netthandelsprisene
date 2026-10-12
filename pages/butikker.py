@@ -8,7 +8,7 @@ from collections import defaultdict
 import streamlit as st
 
 from components import regneark_tabell, topptekst
-from data import er_tall, grupper_vurderinger, normalize_score, snitt_delt_kriterium, status_for_scorer
+from data import er_tall, grupper_vurderinger, normalize_score, status_for_scorer
 from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
 from sheets import read_ratings, read_stores, read_vurderinger
 from theme import FAGFELT_FARGE, KLASSE_IKON, KLASSE_TONE
@@ -133,6 +133,16 @@ visning = st.segmented_control("Visning", ["Oversikt", "Detaljert"], default="Ov
 st.write("")
 
 
+def _fagfelt_status(besvart, totalt):
+    if totalt == 0:
+        return None, None
+    if besvart == totalt:
+        return "✅ Ferdig", "#1E8E5A"
+    if besvart == 0:
+        return "○ Mangler", "#8A8780"
+    return "◐ Påbegynt", "#C8A200"
+
+
 @st.dialog("Butikkdetaljer", width="large")
 def vis_detaljpanel(navn):
     info = butikker[navn]
@@ -140,21 +150,42 @@ def vis_detaljpanel(navn):
     st.caption(f"{info.get('klasse', '–')} · {info.get('bransje', '–')}")
     if info.get("url"):
         st.link_button("Besøk butikk", info["url"], icon=":material/open_in_new:")
+    if aktiv_person:
+        st.caption(f"Viser kun **{aktiv_person}** sine egne kriterier – velg «Alle (delt snitt)» i filteret over for alle jurymedlemmers svar.")
     st.divider()
 
     for fagfelt in FAGFELT:
-        kriterier = KRITERIER_PER_FAGFELT[fagfelt]
+        alle_i_felt = KRITERIER_PER_FAGFELT[fagfelt]
+        kriterier_i_felt = [k for k in alle_i_felt if k in aktive_kriterier_person] if aktiv_person else alle_i_felt
+        if not kriterier_i_felt:
+            continue
         farge = FAGFELT_FARGE.get(fagfelt, "#888")
-        st.markdown(f'<div style="border-left:4px solid {farge};padding-left:10px;margin:12px 0 6px 0;font-weight:700;">{fagfelt}</div>', unsafe_allow_html=True)
-        for k in kriterier:
+
+        if aktiv_person:
+            besvart = sum(1 for k in kriterier_i_felt if any(jm == aktiv_person for jm, *_ in gruppert.get((navn, k), [])))
+        else:
+            besvart = sum(1 for k in kriterier_i_felt if gruppert.get((navn, k)))
+        status_tekst, status_farge = _fagfelt_status(besvart, len(kriterier_i_felt))
+
+        st.markdown(
+            f'<div style="display:flex;justify-content:space-between;align-items:center;border-left:4px solid {farge};padding-left:10px;margin:12px 0 6px 0;">'
+            f'<span style="font-weight:700;">{fagfelt}</span>'
+            f'<span style="color:{status_farge};font-weight:600;font-size:13px;">{status_tekst} ({besvart}/{len(kriterier_i_felt)})</span>'
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        for k in kriterier_i_felt:
             oppforinger = gruppert.get((navn, k), [])
+            if aktiv_person:
+                oppforinger = [o for o in oppforinger if o[0] == aktiv_person]
             if not oppforinger:
                 st.caption(f"{k}: ikke vurdert")
                 continue
             for jurymedlem, score, kommentar, _ in oppforinger:
-                verdi_tekst = f"{'⭐' * int(score)}" if er_tall(score) else score
+                normalisert = normalize_score(score)
+                verdi_tekst = str(normalisert) if isinstance(normalisert, (int, float)) else score
                 kom_ikon = " 💬" if kommentar else ""
-                st.caption(f"{k} — {verdi_tekst} _({jurymedlem})_{kom_ikon}")
+                st.caption(f"{k} — **{verdi_tekst}** _({jurymedlem})_{kom_ikon}")
                 if kommentar:
                     st.caption(f"　↳ {kommentar}")
 
@@ -164,7 +195,16 @@ if visning == "Detaljert":
         navn: {"scorer": {k: delt_scorer_for(navn).get(k, "") for k in ALLE_KRITERIER_FLAT}}
         for navn in navn_liste
     }
-    regneark_tabell(butikker, ratings_for_tabell, KRITERIER_PER_FAGFELT, navn_liste=navn_liste)
+    try:
+        regneark_tabell(butikker, ratings_for_tabell, KRITERIER_PER_FAGFELT, navn_liste=navn_liste)
+    except Exception as e:
+        st.error(
+            "Kunne ikke vise den detaljerte tabellen akkurat nå. Bruk «Oversikt»-visningen i mellomtiden, "
+            "eller trykk «Hent siste fra regnearket» i Innstillinger og prøv igjen.",
+            icon=":material/error:",
+        )
+        with st.expander("Detaljer (for feilsøking)"):
+            st.code(str(e))
 else:
     rader, id_for_rad = [], []
     for navn in navn_liste:

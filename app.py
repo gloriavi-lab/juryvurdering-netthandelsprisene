@@ -14,6 +14,7 @@ import os
 
 import streamlit as st
 
+from jury import aktiv_fase, read_faser
 from sheets import koble_sheets
 from styles import injiser_css
 
@@ -31,14 +32,26 @@ if os.path.exists(LOGO_STI):
 # NB: assets/bring-logo.svg er ikke lagt inn ennå – appen fungerer fint uten,
 # men logoen vises først når fila er på plass (se svar til bruker).
 
-st.session_state["_sh"] = koble_sheets()
+sh = koble_sheets()
+st.session_state["_sh"] = sh
+
+# Demper «Finale» i menyen («Kommende») helt til gjeldende fase faktisk ER
+# Finale – samme fase-kilde som Innstillinger -> Fasestatus styrer.
+finale_tittel = "Finale"
+if sh:
+    try:
+        gjeldende = aktiv_fase(read_faser(sh))
+        if not gjeldende or gjeldende.get("Navn") != "Finale":
+            finale_tittel = "Finale (kommende)"
+    except Exception:
+        pass
 
 sider = [
     st.Page("pages/oversikt.py", title="Oversikt", icon=":material/menu_book:", default=True),
     st.Page("pages/vurdering.py", title="Vurdering", icon=":material/edit_note:"),
     st.Page("pages/butikker.py", title="Butikker", icon=":material/storefront:"),
     st.Page("pages/testkjop.py", title="Testkjøp", icon=":material/shopping_cart:"),
-    st.Page("pages/finale.py", title="Finale", icon=":material/emoji_events:"),
+    st.Page("pages/finale.py", title=finale_tittel, icon=":material/emoji_events:"),
     st.Page("pages/innstillinger.py", title="Innstillinger", icon=":material/settings:"),
 ]
 nav = st.navigation(sider, position="top")

@@ -246,7 +246,8 @@ def lagre_denne(navn):
                 return False
 
     if manglende_kommentar:
-        st.session_state["_lagringstilstand"] = ("feil", "Kommentar er påkrevd ved score 1–3: " + ", ".join(manglende_kommentar))
+        ord = "kriterium" if len(manglende_kommentar) == 1 else "kriterier"
+        st.session_state["_lagringstilstand"] = ("feil", f"{len(manglende_kommentar)} {ord} mangler kommentar: " + ", ".join(manglende_kommentar))
         return False
 
     # Skriv den OFFISIELLE verdien for hvert kriterium vi nettopp lagret inn
@@ -393,8 +394,18 @@ def vis_vurderingsvisning():
             eksisterende = mine_oppslag.get((navn, krit), {})  # MIN egen kommentar (loggen)
             grid_score = normalize_score(fargede_fane_data.get(navn, {}).get("scorer", {}).get(krit))  # offisiell score (den fargede fanen)
             info_k = kriterium_info.get(krit, {})
+            kom_key = f"kom_krit_{navn}_{krit}"
+            seg_key = f"seg_{navn}_{krit}"
 
-            st.markdown(f"**{krit}**" + (f"  \n_{info_k['kort']}_" if info_k.get("kort") else ""))
+            # Mangler-kommentar er regnet ut LIVE (ikke bare etter en feilet
+            # lagring) – oppdaterer seg selv idet man skriver en kommentar,
+            # uten noen egen "sist forsøkt lagret"-tilstand å holde i synk.
+            na_valgt = st.session_state.get(seg_key)
+            na_kommentar = (st.session_state.get(kom_key) or "").strip()
+            mangler_na = isinstance(na_valgt, (int, float)) and na_valgt <= 3 and not na_kommentar
+
+            tittel_farge = "color:#C8102E;" if mangler_na else ""
+            st.markdown(f"<span style='{tittel_farge}font-weight:700;'>{krit}</span>" + (f"  \n_{info_k['kort']}_" if info_k.get("kort") else ""), unsafe_allow_html=True)
             with st.popover("Les mer", icon=":material/help:"):
                 if info_k.get("utfyllende"):
                     st.markdown(info_k["utfyllende"])
@@ -404,18 +415,18 @@ def vis_vurderingsvisning():
                 if info_k.get("eksempler"):
                     st.caption(info_k["eksempler"])
 
-            seg_key = f"seg_{navn}_{krit}"
             if seg_key not in st.session_state:
                 st.session_state[seg_key] = grid_score if isinstance(grid_score, (int, str)) else None
             valg = st.segmented_control("Score", [1, 2, 3, 4, 5, "Kan ikke vurdere"], key=seg_key, label_visibility="collapsed")
 
-            kom_key = f"kom_krit_{navn}_{krit}"
             pakrevd = isinstance(valg, (int, float)) and valg <= 3
             st.text_area(
-                "Kommentar" + (" (påkrevd ved 1–3)" if pakrevd else " (valgfritt)"), value=eksisterende.get("kommentar", ""),
+                "Kommentar" + (" (påkrevd)" if pakrevd else " (valgfritt)"), value=eksisterende.get("kommentar", ""),
                 key=kom_key, placeholder=f"Kommentar til «{krit}»" + (" – påkrevd ved lav score" if pakrevd else "…"),
                 height=68,
             )
+            if mangler_na:
+                st.markdown("<span style='color:#C8102E;font-size:13px;'>⚠ Kommentar mangler</span>", unsafe_allow_html=True)
             st.write("")
 
     st.divider()
@@ -432,6 +443,16 @@ def vis_vurderingsvisning():
                 st.caption(f"**{g['jurymedlem']}** ({g['sist_endret']}): {g['kommentar']}")
 
     st.write("")
+    antall_mangler_na = sum(
+        1 for k in mine_kriterier_flat
+        if isinstance(st.session_state.get(f"seg_{navn}_{k}"), (int, float))
+        and st.session_state.get(f"seg_{navn}_{k}") <= 3
+        and not (st.session_state.get(f"kom_krit_{navn}_{k}") or "").strip()
+    )
+    if antall_mangler_na:
+        ord = "kriterium" if antall_mangler_na == 1 else "kriterier"
+        st.markdown(f"<span style='color:#C8102E;font-weight:600;'>⚠ {antall_mangler_na} {ord} mangler kommentar</span>", unsafe_allow_html=True)
+
     tilstand = st.session_state.get("_lagringstilstand")
     if tilstand:
         lagringsstatus(tilstand[0], tilstand[1])
