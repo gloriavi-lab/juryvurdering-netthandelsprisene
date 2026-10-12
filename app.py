@@ -37,6 +37,7 @@ sider = [
     st.Page("pages/oversikt.py", title="Oversikt", icon=":material/menu_book:", default=True),
     st.Page("pages/vurdering.py", title="Vurdering", icon=":material/edit_note:"),
     st.Page("pages/butikker.py", title="Butikker", icon=":material/storefront:"),
+    st.Page("pages/testkjop.py", title="Testkjøp", icon=":material/shopping_cart:"),
     st.Page("pages/finale.py", title="Finale", icon=":material/emoji_events:"),
     st.Page("pages/innstillinger.py", title="Innstillinger", icon=":material/settings:"),
 ]

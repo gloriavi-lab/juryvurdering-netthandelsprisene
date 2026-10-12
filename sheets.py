@@ -46,7 +46,7 @@ from data import FAGFELT, IKKE_VURDERT, KRITERIER_PER_FAGFELT, grupper_vurdering
 FASE1_FANE = "Rangering juryvurdering"  # tidligere "Rangering fase 1" – omdøpt etter avtale (ny fase-nummerering, se jury.py/Faser-fanen)
 FASE2_FANE = "Rangering ekspertvurdering"  # tidligere "Rangering fase 2"
 _GAMLE_NAVN = {FASE1_FANE: "Rangering fase 1", FASE2_FANE: "Rangering fase 2"}
-GRUNNKOLONNER = ["Butikk", "Jurymedlem", "Klasse", "Bransje", "URL"]
+GRUNNKOLONNER = ["Butikk", "Jurymedlem", "Klasse", "Bransje", "URL", "Fase"]
 SNITT_KOLONNE_NAVN = "Snitt totalt"
 KOMMENTAR_PREFIKS = "Kommentar – "
 # Lagt til helt til høyre, FORESLÅTT til bruker (ikke i den opprinnelige fila):
@@ -342,6 +342,7 @@ def _les_butikkliste(ws, grunn):
     gyldige_klasser = {"Liten", "Medium", "Stor"}
     kol_butikk, kol_klasse = grunn.get("Butikk"), grunn.get("Klasse")
     kol_bransje, kol_url = grunn.get("Bransje"), grunn.get("URL")
+    kol_fase = grunn.get("Fase")
     for r in range(FORSTE_DATARAD, len(formatert) + 1):
         rad = formatert[r - 1]
         navn = (rad[kol_butikk - 1].strip() if kol_butikk and len(rad) >= kol_butikk else "")
@@ -357,6 +358,10 @@ def _les_butikkliste(ws, grunn):
             "klasse": klasse,
             "bransje": rad[kol_bransje - 1].strip() if kol_bransje and len(rad) >= kol_bransje else "",
             "url": url,
+            # Valgfri kolonne – tom betyr «vis i alle faser» (bakoverkompatibelt,
+            # ingenting filtreres bort før noen faktisk fyller den ut). Se
+            # jury.gjeldende_fase_streng() for hvordan den brukes.
+            "fase": rad[kol_fase - 1].strip() if kol_fase and len(rad) >= kol_fase else "",
             "rad": r,
         }
     return butikker, advarsler

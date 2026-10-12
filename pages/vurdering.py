@@ -22,7 +22,10 @@ import streamlit as st
 
 from components import fremdriftslinje, klasse_badge, lagringsstatus, scroll_til_toppen, status_merkelapp_html, topptekst, tom_tilstand
 from data import IKKE_VURDERT, grupper_vurderinger, mine_scorer, naa_norsk, normalize_score, offisiell_celleverdi, status_for_scorer
-from jury import aktive_kriterier, beskriv_tildeling, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
+from jury import (
+    aktive_kriterier, beskriv_tildeling, gjeldende_fase_streng, kriterier_per_fagfelt, mine_kriterier, read_criteria,
+    read_faser, read_jury,
+)
 from sheets import (
     feilsok_farget_fane, feilsok_vurdering, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger,
     skriv_mange_til_farget_fane, upsert_generell_kommentar, upsert_vurdering,
@@ -51,6 +54,18 @@ try:
 except Exception as e:
     st.error(f"Kunne ikke lese regnearket: {e}", icon=":material/error:")
     st.stop()
+
+# Fase-styrt butikkliste: valgfri «Fase»-kolonne i butikklistens kildefane
+# (se sheets._les_butikkliste) – en butikk skjules KUN hvis den kolonnen
+# faktisk er fylt ut OG ikke matcher gjeldende fase. Tom kolonne (standard,
+# ingenting endret ennå) betyr "vis i alle faser" – helt bakoverkompatibelt
+# inntil noen faktisk tar den i bruk.
+try:
+    _gjeldende_fase_txt = gjeldende_fase_streng(read_faser(sh))
+except Exception:
+    _gjeldende_fase_txt = None
+if _gjeldende_fase_txt:
+    butikker = {navn: info for navn, info in butikker.items() if not info.get("fase") or info.get("fase") == _gjeldende_fase_txt}
 
 kriterier_fase3 = aktive_kriterier(alle_kriterier, fase="Fase 3")
 kriterier_per_felt_alle = kriterier_per_fagfelt(kriterier_fase3)

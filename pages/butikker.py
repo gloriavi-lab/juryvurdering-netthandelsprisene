@@ -8,9 +8,9 @@ from collections import defaultdict
 import streamlit as st
 
 from components import regneark_tabell, topptekst
-from data import er_tall, grupper_vurderinger, snitt_delt_kriterium, status_for_scorer
+from data import er_tall, grupper_vurderinger, normalize_score, snitt_delt_kriterium, status_for_scorer
 from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
-from sheets import read_stores, read_vurderinger
+from sheets import read_ratings, read_stores, read_vurderinger
 from theme import FAGFELT_FARGE, KLASSE_IKON, KLASSE_TONE
 
 topptekst("Butikker")
@@ -23,6 +23,7 @@ if not sh:
 try:
     butikker, _ = read_stores(sh)
     alle_vurderinger = read_vurderinger(sh)
+    fargede_fane_data = read_ratings(sh)
     jury = read_jury(sh)
     kriterier_fase3 = aktive_kriterier(read_criteria(sh), fase="Fase 3")
 except Exception as e:
@@ -40,9 +41,19 @@ if not butikker:
 
 
 def delt_scorer_for(navn):
-    """{kriterium: snitt} på tvers av ALLE jurymedlemmer som har vurdert –
-    til status/snitt-beregning når ingen person er valgt i filteret."""
-    return {k: snitt_delt_kriterium(gruppert, navn, k) for k in ALLE_KRITERIER_FLAT if snitt_delt_kriterium(gruppert, navn, k) is not None}
+    """{kriterium: verdi} fra DEN FARGEDE FANEN – det offisielle, delte
+    snittet (se DATAMODELL-forklaringen i sheets.py), brukt til status/snitt
+    når ingen person er valgt i filteret. Per-jurymedlem-visningen
+    (person_scorer_for) bruker fortsatt loggen («Vurderinger»), siden den
+    fargede fanen ikke vet HVEM som satte en verdi – bare hva den endte på."""
+    alle = fargede_fane_data.get(navn, {}).get("scorer", {})
+    resultat = {}
+    for k in ALLE_KRITERIER_FLAT:
+        if k in alle:
+            verdi = normalize_score(alle[k])
+            if verdi is not None:
+                resultat[k] = verdi
+    return resultat
 
 
 def person_scorer_for(navn, jurymedlem):
@@ -150,7 +161,7 @@ def vis_detaljpanel(navn):
 
 if visning == "Detaljert":
     ratings_for_tabell = {
-        navn: {"scorer": {k: snitt_delt_kriterium(gruppert, navn, k) or "" for k in ALLE_KRITERIER_FLAT}}
+        navn: {"scorer": {k: delt_scorer_for(navn).get(k, "") for k in ALLE_KRITERIER_FLAT}}
         for navn in navn_liste
     }
     regneark_tabell(butikker, ratings_for_tabell, KRITERIER_PER_FAGFELT, navn_liste=navn_liste)
@@ -161,7 +172,7 @@ else:
         scorer = person_scorer_for(navn, aktiv_person) if aktiv_person else delt_scorer_for(navn)
         relevante = [k for k in ALLE_KRITERIER_FLAT if k in aktive_kriterier_person] if aktiv_person else ALLE_KRITERIER_FLAT
         besvart = sum(1 for k in relevante if k in scorer and scorer[k])
-        tall = [float(scorer[k]) for k in relevante if k in scorer and er_tall(scorer[k])]
+        tall = [normalize_score(scorer[k]) for k in relevante if k in scorer and er_tall(scorer[k])]
         snitt = round(sum(tall) / len(tall), 2) if tall else None
         har_kom = any(gruppert.get((navn, k)) and any(kom for _, _, kom, _ in gruppert[(navn, k)]) for k in ALLE_KRITERIER_FLAT)
         rader.append({

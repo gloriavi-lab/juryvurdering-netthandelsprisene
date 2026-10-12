@@ -72,6 +72,45 @@ _GENERISK_SKALA = {
 }
 
 
+_UNIVERSELL_UTFORMING_UTFYLLENDE = (
+    "Hvor godt nettbutikken er tilrettelagt for brukere med ulike behov (syn, hørsel, motorikk, kognisjon). "
+    "WCAG 2.1 nivå AA er en nyttig referanse, men du trenger ikke være ekspert – prøv å navigere med kun "
+    "tastatur, sjekk kontrast og tekststørrelse, og se om bilder har alt-tekst."
+)
+
+# Forslag til NYE kriterier (foreslått og delvis godkjent tidligere i
+# prosjektet, men ALDRI faktisk skrevet inn i et allerede eksisterende,
+# levende Kriterier-ark – _seed_kriterier_rader() under kjører kun når
+# fanen opprettes helt fra bunnen). Brukes av Innstillinger til å tilby å
+# legge dem til i et ark som allerede finnes, uten å gjette på andre
+# endringer i kriterielisten.
+FORESLATTE_TILLEGGSKRITERIER = [
+    {
+        "fagfelt": "Innovasjon", "kriterium": "Agentic commerce",
+        "kort": "Hvor godt butikken er rustet for at AI-assistenter og shoppingagenter kan finne, sammenligne og kjøpe produkter på vegne av kunden.",
+        "utfyllende": _AGENTIC_UTFYLLENDE,
+        "skala1": _AGENTIC_SKALA["Skala 1"], "skala3": _AGENTIC_SKALA["Skala 3"], "skala5": _AGENTIC_SKALA["Skala 5"],
+        "eksempler": "", "faser": ["Fase 3"],
+    },
+    {
+        "fagfelt": "Kundeservice & Tilgjengelighet", "kriterium": "Universell utforming",
+        "kort": "Hvor godt nettbutikken er tilrettelagt for brukere med ulike behov (syn, hørsel, motorikk, kognisjon).",
+        "utfyllende": _UNIVERSELL_UTFORMING_UTFYLLENDE,
+        "skala1": "Store hindringer for brukere med nedsatt funksjonsevne – f.eks. umulig å navigere med tastatur, manglende alt-tekst, dårlig kontrast.",
+        "skala3": "Grunnleggende tilrettelagt, men med tydelige mangler (enkelte uklare kontraster, mangelfull alt-tekst eller navigasjon).",
+        "skala5": "Godt tilrettelagt etter anerkjente retningslinjer (f.eks. WCAG 2.1 AA) – god kontrast, navigerbar med tastatur/skjermleser, beskrivende alt-tekst.",
+        "eksempler": "", "faser": ["Fase 3"],
+    },
+]
+
+
+def manglende_foreslatte_kriterier(alle_kriterier):
+    """De av FORESLATTE_TILLEGGSKRITERIER som ikke allerede finnes (uansett
+    aktiv/inaktiv) i det faktiske, levende Kriterier-arket."""
+    eksisterende_navn = {k["kriterium"] for k in alle_kriterier}
+    return [f for f in FORESLATTE_TILLEGGSKRITERIER if f["kriterium"] not in eksisterende_navn]
+
+
 def _seed_kriterier_rader():
     rader = []
     for fagfelt, kriterium, kort, faser in _STANDARD_KRITERIER_SEED:
@@ -308,15 +347,57 @@ def read_veiledning(_sh):
 
 
 # ─────────────────────────────────────────────
+# Testkjøp – egen, enkel veiledningsfane (samme Overskrift/Tekst-oppsett som
+# Veiledning, men en egen fane siden det er et annet tema/en annen fase).
+# Guide-først, bevisst: siden selve registrering av funn fra et testkjøp
+# ikke er spesifisert ennå (hva skal noteres, av hvem, delt per kriterium
+# eller fritekst?), bygger denne siden KUN veiledningen – ingen ny
+# datalagring er lagt til for å unngå å gjette feil på en datamodell som
+# må endres igjen senere.
+# ─────────────────────────────────────────────
+TESTKJOP_VEILEDNING_FANE = "Testkjøp-veiledning"
+_TESTKJOP_VEILEDNING_SEED = [
+    ["Hva er et testkjøp?", "Du handler som en vanlig kunde ville gjort – fra første søk til varen er mottatt (eller returnert). Målet er å avdekke ting som er vanskelige å se uten faktisk å gjennomføre et kjøp: leveringstid, kommunikasjon underveis, og hvordan butikken håndterer en reell henvendelse."],
+    ["Gjennomfør hele kjøpsløpet", "Søk/bla frem en vare → legg i handlekurv → gå gjennom kassen (betalingsalternativer, leveringsvalg, ordrebekreftelse) → følg leveringen til varen er mottatt. Ta gjerne skjermbilder underveis – de er nyttige om noe skal diskuteres i juryen senere."],
+    ["Kundeservice", "Ta kontakt med kundeservice med et reelt, enkelt spørsmål (f.eks. om levering eller en vare) via minst én tilgjengelig kanal. Noter responstid, tone og om du faktisk fikk svar på det du spurte om."],
+    ["Retur og angrerett", "Sjekk at angrerett, returvilkår og eventuelle returkostnader er tydelig opplyst FØR kjøp – ikke bare gjemt i de generelle vilkårene. Gjennomfør gjerne en retur hvis praktisk mulig, og noter hvor enkelt prosessen var."],
+    ["Compliance / prisopplysning", "Er pris, totalkostnad (inkl. frakt), firmainformasjon og angrerett opplyst slik lovverket krever? Dette trenger ikke juridisk dybdevurdering – noter tydelige avvik du selv oppdager som vanlig kunde."],
+    ["Universell utforming", "Prøv å navigere med kun tastatur, og sjekk kontrast og lesbarhet. Du trenger ikke være ekspert – noter konkrete ting som var vanskelig (f.eks. knapper du ikke fikk fokus på, tekst med dårlig kontrast, bilder uten beskrivelse for skjermlesere)."],
+    ["Dokumenter underveis", "Noter tidspunkt og konkrete observasjoner mens de er ferske, i stedet for å stole på hukommelsen etterpå – spesielt leveringstid og kundeservice-responstid er lette å glemme nøyaktig på."],
+]
+
+
+@st.cache_data(ttl=120, show_spinner=False)
+def read_testkjop_veiledning(_sh):
+    ws = hent_eller_lag_fane(_sh, TESTKJOP_VEILEDNING_FANE, VEILEDNING_HEADER)
+    if len(ws.get_all_values()) <= 1:
+        ws.append_rows(_TESTKJOP_VEILEDNING_SEED)
+        read_testkjop_veiledning.clear()
+        return ws.get_all_records()
+    return ws.get_all_records()
+
+
+# ─────────────────────────────────────────────
 # Faser
 # ─────────────────────────────────────────────
 _FASER_SEED = [
     [1, "Screening", "En AI-agent screener alle nominerte nettbutikker.", "Fullført", "", ""],
     [2, "Juryvurdering", "Juryen vurderer butikkene.", "Fullført", "", ""],
     [3, "Ekspertvurdering", "Jurymedlemmene vurderer kriteriene de er tildelt.", "Pågår", "", ""],
-    [4, "Testhandel", "Testkjøp, kundeservice, compliance og universell utforming.", "Kommende", "", ""],
+    [4, "Testkjøp", "Jurymedlemmene handler som en vanlig kunde og vurderer kundeservice, compliance og universell utforming.", "Kommende", "", ""],
     [5, "Finale", "De beste butikkene i hver størrelsesklasse kåres.", "Kommende", "", ""],
 ]
+
+
+def _omdop_testhandel(ws):
+    """«Testhandel» ble omdøpt til «Testkjøp» (avtalt med bruker) – retter
+    opp automatisk i et ark som allerede har den gamle fasenavnet, uten å
+    røre noe annet på raden (beskrivelse, status, datoer)."""
+    rader = ws.get_all_values()
+    for i, rad in enumerate(rader[1:], start=2):
+        if len(rad) >= 2 and rad[1].strip() == "Testhandel":
+            ws.update([["Testkjøp"]], range_name=f"B{i}")
+            read_faser.clear()
 
 
 def _migrer_gammelt_faser_format(ws):
@@ -350,6 +431,7 @@ def _migrer_gammelt_faser_format(ws):
 def read_faser(_sh):
     ws = hent_eller_lag_fane(_sh, FASER_FANE, FASER_HEADER)
     _migrer_gammelt_faser_format(ws)
+    _omdop_testhandel(ws)
     if len(ws.get_all_values()) <= 1:
         ws.append_rows(_FASER_SEED)
         read_faser.clear()
@@ -362,6 +444,27 @@ def aktiv_fase(faser: list):
     if len(aktive) == 1:
         return aktive[0]
     return faser[0] if faser else None
+
+
+# Faser-fanens fasenummer -> samme fase-tekst-konvensjon som Kriterier-fanens
+# «Fase»-felt («Fase 2»/«Fase 3»/«Testkjøp», se FORESLATTE_TILLEGGSKRITERIER)
+# og butikklistens valgfrie «Fase»-kolonne (se sheets._les_butikkliste).
+_FASE_NUMMER_TIL_STRENG = {2: "Fase 2", 3: "Fase 3", 4: "Testkjøp"}
+
+
+def gjeldende_fase_streng(faser: list):
+    """None hvis ingen aktiv fase er gjenkjent, eller hvis gjeldende fase
+    ikke har en kjent tekst-motsvarighet (f.eks. Screening/Finale – disse
+    filtrerer ikke butikklisten). Brukes til å filtrere butikklisten etter
+    butikkens egen, valgfrie Fase-kolonne – se sheets._les_butikkliste()."""
+    f = aktiv_fase(faser)
+    if not f:
+        return None
+    try:
+        nummer = int(f.get("Fase", 0))
+    except (TypeError, ValueError):
+        return None
+    return _FASE_NUMMER_TIL_STRENG.get(nummer)
 
 
 def sett_gjeldende_fase(sh, fase_nummer):

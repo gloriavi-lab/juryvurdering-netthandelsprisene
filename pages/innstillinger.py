@@ -8,8 +8,8 @@ import streamlit as st
 from components import status_prikk, topptekst
 from jury import (
     add_criterion, aktive_kriterier, aktiv_fase, deaktiver_kriterium, fagfelt_liste, kriterier_per_fagfelt,
-    mine_kriterier, oppdater_kriterium, read_criteria, read_faser, read_jury, sett_gjeldende_fase, slett_jurymedlem,
-    write_jury,
+    manglende_foreslatte_kriterier, mine_kriterier, oppdater_kriterium, read_criteria, read_faser, read_jury,
+    sett_gjeldende_fase, slett_jurymedlem, write_jury,
 )
 from sheets import (
     FASE1_FANE, FASE2_FANE, er_finale_last, fane_oversikt, feilsok_farget_fane, feilsok_vurdering, finale_las_info,
@@ -80,6 +80,13 @@ except Exception as e:
     st.stop()
 
 st.caption(f"Leser butikklisten direkte fra fanen «{FASE1_FANE}» – {len(butikker)} butikker funnet.")
+with st.expander("Fase-styrt butikkliste (valgfritt)", icon=":material/filter_alt:"):
+    st.caption(
+        f"Legg til en kolonne kalt nøyaktig «Fase» i «{FASE1_FANE}» og skriv «Fase 2», «Fase 3» eller «Testkjøp» "
+        "i den for en butikk, så vises den KUN for jury når akkurat den fasen er «Pågår» under Fasestatus lenger "
+        "ned. Tom celle (standard) betyr at butikken vises uansett fase – ingenting filtreres bort før dere "
+        "faktisk fyller ut kolonnen for noen butikker."
+    )
 
 if advarsler:
     with st.expander(f"Avvik i regnearket ({len(advarsler)})", expanded=False, icon=":material/warning:"):
@@ -436,10 +443,16 @@ def jury_dialog(redigerer_navn=None):
 
 
 @st.dialog("Kriterium")
-def kriterium_dialog(redigerer_kriterium=None):
+def kriterium_dialog(redigerer_kriterium=None, forslag=None):
+    """forslag: valgfritt ferdigutfylt forslag til et NYTT kriterium (fra
+    jury.FORESLATTE_TILLEGGSKRITERIER) – navnefeltet forblir redigerbart
+    (i motsetning til ved redigering av et eksisterende kriterium), slik at
+    du kan justere før lagring."""
     feil_plassholder_krit = st.empty()
-    eksisterende = next((k for k in alle_kriterier if k["kriterium"] == redigerer_kriterium), {}) if redigerer_kriterium else {}
+    eksisterende = (next((k for k in alle_kriterier if k["kriterium"] == redigerer_kriterium), {}) if redigerer_kriterium else None) or forslag or {}
     fagfelt_valg = list(felt_dict.keys()) or fagfelt_liste(alle_kriterier)
+    if eksisterende.get("fagfelt") and eksisterende["fagfelt"] not in fagfelt_valg:
+        fagfelt_valg = [eksisterende["fagfelt"]] + fagfelt_valg  # forslag kan ha et fagfelt ingen AKTIVE kriterier bruker ennå
     fagfelt_sel = st.selectbox("Fagfelt", fagfelt_valg, index=fagfelt_valg.index(eksisterende["fagfelt"]) if eksisterende.get("fagfelt") in fagfelt_valg else 0)
     navn_sel = st.text_input("Kriterium (navn)", value=eksisterende.get("kriterium", ""), disabled=bool(redigerer_kriterium))
     kort_sel = st.text_input("Kort beskrivelse", value=eksisterende.get("kort", ""))
@@ -449,9 +462,9 @@ def kriterium_dialog(redigerer_kriterium=None):
     skala3_sel = s3.text_input("Hva gir 3", value=eksisterende.get("skala3", ""))
     skala5_sel = s5.text_input("Hva gir 5", value=eksisterende.get("skala5", ""))
     eksempler_sel = st.text_input("Eksempler", value=eksisterende.get("eksempler", ""))
-    faser_sel = st.multiselect("Brukes i fase(r)", ["Fase 2", "Fase 3", "Testhandel"], default=eksisterende.get("faser", ["Fase 3"]))
+    faser_sel = st.multiselect("Brukes i fase(r)", ["Fase 2", "Fase 3", "Testkjøp"], default=eksisterende.get("faser", ["Fase 3"]))
     aktiv_sel = st.checkbox("Aktiv", value=eksisterende.get("aktiv", True)) if redigerer_kriterium else True
-    sett_inn_kolonne = st.checkbox("Sett også inn ny kolonne i Rangering-fanene nå", value=False, disabled=bool(redigerer_kriterium), help="Kun aktuelt for nye kriterier.")
+    sett_inn_kolonne = st.checkbox("Sett også inn ny kolonne i Rangering-fanene nå", value=bool(forslag), disabled=bool(redigerer_kriterium), help="Kun aktuelt for nye kriterier.")
 
     c1, c2 = st.columns(2)
     if c1.button("Avbryt", use_container_width=True):
@@ -520,6 +533,24 @@ with fane_jury:
                     jury_dialog(navn)
 
 with fane_kriterier:
+    manglende_forslag = manglende_foreslatte_kriterier(alle_kriterier)
+    if manglende_forslag:
+        with st.container(border=True):
+            st.markdown("**Foreslåtte kriterier som ikke er lagt til ennå**")
+            st.caption("Tekst foreslått/godkjent tidligere, men aldri faktisk skrevet inn i dette regnearket – juster gjerne før du lagrer.")
+            for f in manglende_forslag:
+                fkc1, fkc2 = st.columns([5, 1])
+                fkc1.markdown(f"**{f['kriterium']}** _({f['fagfelt']})_ — {f['kort']}")
+                if fkc2.button("Legg til", key=f"legg_til_forslag_{f['kriterium']}", use_container_width=True):
+                    st.session_state["_vis_forslag_dialog"] = f["kriterium"]
+        st.write("")
+
+    if st.session_state.get("_vis_forslag_dialog"):
+        _valgt_forslag = next((f for f in manglende_forslag if f["kriterium"] == st.session_state["_vis_forslag_dialog"]), None)
+        st.session_state["_vis_forslag_dialog"] = None
+        if _valgt_forslag:
+            kriterium_dialog(forslag=_valgt_forslag)
+
     if st.button("Legg til kriterium", type="primary", icon=":material/add_circle:"):
         kriterium_dialog()
     st.write("")
