@@ -1,7 +1,15 @@
 """Side 2 – Vurdering. Butikkliste er standardvisningen; klikk en butikk for
-å vurdere den. Lagrer til den nye "Vurderinger"-fanen (én rad per butikk +
-jurymedlem + kriterium – se sheets.py). Tall 1–5 i stedet for stjerner,
-kommentar per kriterium (påkrevd ved 1–3), ingen fagfelt-nivå-kommentar.
+å vurdere den. Tall 1–5 i stedet for stjerner, kommentar per kriterium
+(påkrevd ved 1–3), ingen fagfelt-nivå-kommentar.
+
+DATAMODELL (se VIKTIG-avsnittet øverst i sheets.py for full forklaring):
+appen leser og skriver DIREKTE til den fargede fanen for gjeldende fase
+("Rangering ekspertvurdering" – FASE2_FANE) for score+kommentar (kommentar
+som celle-notat) – det er DEN fanen jury/administrasjon faktisk ser og kan
+rette manuelt i. "Vurderinger"-fanen er en LOGG (én rad per butikk +
+jurymedlem + kriterium) som oppdateres ved hver lagring, brukt til å regne
+ut riktig celleverdi når flere jurymedlemmer deler ett kriterium (snitt) –
+den er IKKE det som vises i skjemaet.
 
 VIKTIG tilstandshåndtering: nøklene for score/kommentar-widgetene nullstilles
 EKSPLISITT når brukeren bytter til en ANNEN butikk (sammenlignet med forrige
@@ -10,14 +18,15 @@ lagret – ikke en tilfeldig gammel verdi fra en tidligere visning i samme
 nettleserøkt. Det var roten til at en slettet kommentar kunne "komme
 tilbake" og at en score kunne se ut til å forsvinne."""
 
-from datetime import datetime
-
 import streamlit as st
 
 from components import fremdriftslinje, klasse_badge, lagringsstatus, status_merkelapp_html, topptekst, tom_tilstand
-from data import IKKE_VURDERT, grupper_vurderinger, mine_scorer, normalize_score, snitt_delt_kriterium, status_for_scorer
+from data import IKKE_VURDERT, grupper_vurderinger, mine_scorer, naa_norsk, normalize_score, offisiell_celleverdi, status_for_scorer
 from jury import aktive_kriterier, beskriv_tildeling, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
-from sheets import feilsok_vurdering, read_generelle_kommentarer, read_stores, read_vurderinger, upsert_generell_kommentar, upsert_vurdering
+from sheets import (
+    feilsok_farget_fane, feilsok_vurdering, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger,
+    skriv_mange_til_farget_fane, upsert_generell_kommentar, upsert_vurdering,
+)
 from theme import FAGFELT_FARGE, STATUS_FARGE, STATUS_TEKST, STATUS_TONE
 
 topptekst("Vurdering")
@@ -67,16 +76,21 @@ if not mine:
 mine_per_felt = {felt: [k for k in krit if k in mine] for felt, krit in kriterier_per_felt_alle.items()}
 mine_per_felt = {felt: krit for felt, krit in mine_per_felt.items() if krit}
 mine_kriterier_flat = [k for krit in mine_per_felt.values() for k in krit]
+krit_til_fagfelt = {k: felt for felt, krit in mine_per_felt.items() for k in krit}
 
 try:
     alle_vurderinger = read_vurderinger(sh)
     alle_generelle = read_generelle_kommentarer(sh)
+    fargede_fane_data = read_ratings(sh)
 except Exception as e:
     st.error(f"Kunne ikke lese vurderinger: {e}", icon=":material/error:")
     st.stop()
 
+# mine_oppslag (LOGGEN, "Vurderinger") brukes KUN for å seede MIN EGEN
+# kommentartekst per kriterium (det jeg selv sist skrev) – selve scoren/
+# status vises fra den fargede fanen (fargede_fane_data), se DATAMODELL-
+# avsnittet øverst i fila: det er DEN fanen manuelle rettelser skjer i.
 mine_oppslag = mine_scorer(alle_vurderinger, jurynavn)  # (butikk,kriterium) -> {score,kommentar,sist_endret}
-gruppert_alle = grupper_vurderinger(alle_vurderinger)  # for kommentar-ikon på tvers av jury
 generell_per_butikk = {}
 for g in alle_generelle:
     generell_per_butikk.setdefault(g["butikk"], []).append(g)
@@ -84,18 +98,23 @@ for g in alle_generelle:
 navn_liste_butikker = sorted(butikker.keys())
 
 
-def mine_scorer_for(navn):
-    return {krit: mine_oppslag[(navn, krit)]["score"] for krit in mine_kriterier_flat if (navn, krit) in mine_oppslag}
+def grid_scorer_for(navn):
+    """{kriterium: rå_verdi} fra DEN FARGEDE FANEN, begrenset til MINE
+    tildelte kriterier – dette er den offisielle, synlige verdien (se
+    DATAMODELL øverst i fila)."""
+    alle_scorer = fargede_fane_data.get(navn, {}).get("scorer", {})
+    return {k: alle_scorer[k] for k in mine_kriterier_flat if k in alle_scorer}
 
 
 def status(navn):
-    return status_for_scorer(mine_scorer_for(navn), mine_kriterier_flat)
+    return status_for_scorer(grid_scorer_for(navn), mine_kriterier_flat)
 
 
 def status_per_fagfelt(navn):
+    scorer = grid_scorer_for(navn)
     resultat = {}
     for fagfelt, kriterier in mine_per_felt.items():
-        besvart = sum(1 for k in kriterier if (navn, k) in mine_oppslag)
+        besvart = sum(1 for k in kriterier if k in scorer)
         resultat[fagfelt] = (besvart, len(kriterier))
     return resultat
 
@@ -207,6 +226,29 @@ def lagre_denne(navn):
         st.session_state["_lagringstilstand"] = ("feil", "Kommentar er påkrevd ved score 1–3: " + ", ".join(manglende_kommentar))
         return False
 
+    # Skriv den OFFISIELLE verdien for hvert kriterium vi nettopp lagret inn
+    # i DEN FARGEDE FANEN (se DATAMODELL øverst i fila – det er DEN jury og
+    # administrasjon faktisk ser og kan rette manuelt i). Regnes ut fra en
+    # FERSK lesing av loggen (upsert_vurdering har allerede tømt cachen),
+    # slik at et kriterium flere jurymedlemmer deler får riktig snitt i
+    # stedet for at siste lagring bare overskriver de andres score.
+    skrivejobb = []
+    if skrevet:
+        try:
+            fersk_vurderinger = read_vurderinger(sh)
+        except Exception as e:
+            st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke lese loggen for å oppdatere den fargede fanen: {e}")
+            return False
+        fersk_gruppert = grupper_vurderinger(fersk_vurderinger)
+        for krit in skrevet:
+            verdi, notat = offisiell_celleverdi(fersk_gruppert.get((navn, krit), []))
+            skrivejobb.append((krit_til_fagfelt.get(krit), krit, verdi, notat))
+        try:
+            skriv_mange_til_farget_fane(sh, navn, skrivejobb)
+        except Exception as e:
+            st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke skrive til den fargede fanen: {e}")
+            return False
+
     generell_tekst = (st.session_state.get(f"generell_{navn}") or "").strip()
     try:
         upsert_generell_kommentar(sh, navn, jurynavn, generell_tekst)
@@ -224,9 +266,24 @@ def lagre_denne(navn):
         for rad in kontroll:
             forventet_score, forventet_kommentar = skrevet[rad["kriterium"]]
             if rad["normalisert_score"] != normalize_score(forventet_score):
-                avvik.append(f"«{rad['kriterium']}»: skrev {forventet_score!r}, fant {rad['rå_score']!r} i {rad['fane']} {rad['celle']}")
+                avvik.append(f"«{rad['kriterium']}» i loggen: skrev {forventet_score!r}, fant {rad['rå_score']!r} i {rad['fane']} {rad['celle']}")
             elif (rad["rå_kommentar"] or "") != (forventet_kommentar or ""):
-                avvik.append(f"«{rad['kriterium']}»: kommentaren stemmer ikke med det som ble lagret")
+                avvik.append(f"«{rad['kriterium']}»: kommentaren i loggen stemmer ikke med det som ble lagret")
+
+    # Les den fargede fanen tilbake også – det er DEN som faktisk vises i
+    # appen og som jury/administrasjon ser, så «Lagret» skal aldri vises
+    # uten at NETTOPP denne stemmer, ikke bare loggen.
+    if skrivejobb:
+        try:
+            kontroll_grid = feilsok_farget_fane(sh, navn, [(fagfelt, krit) for fagfelt, krit, _, _ in skrivejobb])
+        except Exception as e:
+            st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke lese tilbake fra den fargede fanen: {e}")
+            return False
+        forventet_verdi = {krit: verdi for _, krit, verdi, _ in skrivejobb}
+        for rad in kontroll_grid:
+            forventet = forventet_verdi.get(rad["kriterium"])
+            if rad["normalisert_score"] != forventet:
+                avvik.append(f"«{rad['kriterium']}» i {rad['fane']} {rad['celle']}: skrev {forventet!r}, fant {rad['rå_score']!r}")
 
     try:
         kontroll_generelle = read_generelle_kommentarer(sh)
@@ -241,7 +298,7 @@ def lagre_denne(navn):
         st.session_state["_lagringstilstand"] = ("feil", "Lagringen kunne IKKE bekreftes i regnearket: " + "; ".join(avvik))
         return False
 
-    st.session_state["_lagringstilstand"] = ("lagret", datetime.now().strftime("%H:%M"))
+    st.session_state["_lagringstilstand"] = ("lagret", naa_norsk().strftime("%H:%M"))
     return True
 
 
@@ -299,8 +356,8 @@ def vis_vurderingsvisning():
         farge = FAGFELT_FARGE.get(fagfelt, "#888")
         st.markdown(f'<div style="border-left:4px solid {farge};padding-left:10px;margin:14px 0 10px 0;font-weight:700;">{fagfelt}</div>', unsafe_allow_html=True)
         for krit in kriterier:
-            eksisterende = mine_oppslag.get((navn, krit), {})
-            eksisterende_score = normalize_score(eksisterende.get("score"))
+            eksisterende = mine_oppslag.get((navn, krit), {})  # MIN egen kommentar (loggen)
+            grid_score = normalize_score(fargede_fane_data.get(navn, {}).get("scorer", {}).get(krit))  # offisiell score (den fargede fanen)
             info_k = kriterium_info.get(krit, {})
 
             st.markdown(f"**{krit}**" + (f"  \n_{info_k['kort']}_" if info_k.get("kort") else ""))
@@ -315,7 +372,7 @@ def vis_vurderingsvisning():
 
             seg_key = f"seg_{navn}_{krit}"
             if seg_key not in st.session_state:
-                st.session_state[seg_key] = eksisterende_score if isinstance(eksisterende_score, (int, str)) else None
+                st.session_state[seg_key] = grid_score if isinstance(grid_score, (int, str)) else None
             valg = st.segmented_control("Score", [1, 2, 3, 4, 5, "Kan ikke vurdere"], key=seg_key, label_visibility="collapsed")
 
             kom_key = f"kom_krit_{navn}_{krit}"

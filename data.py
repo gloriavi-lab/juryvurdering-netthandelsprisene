@@ -3,9 +3,21 @@ Sheets-kall her (det ligger i sheets.py). Selve kriterietekstene og
 poengberegningen er UENDRET fra tidligere versjoner."""
 
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import openpyxl
 import streamlit as st
+
+OSLO = ZoneInfo("Europe/Oslo")
+
+
+def naa_norsk() -> datetime:
+    """Serveren (Streamlit Cloud) kjører normalt i UTC – alle tidsstempler
+    som vises til jury/administrasjon skal likevel være norsk tid, ikke
+    serverens lokale tid. Brukes overalt et tidsstempel skrives eller vises."""
+    return datetime.now(OSLO)
+
 
 # ─────────────────────────────────────────────
 # Kriterier – IDENTISK ordlyd som i Fase 1-arket (5 kategorier, 16 kriterier)
@@ -219,3 +231,26 @@ def snitt_delt_kriterium(gruppert: dict, butikk: str, kriterium: str):
     oppforinger = gruppert.get((butikk, kriterium), [])
     tall = [normalize_score(s) for _, s, _, _ in oppforinger if er_tall(s)]
     return (sum(tall) / len(tall)) if tall else None
+
+
+def offisiell_celleverdi(oppforinger: list):
+    """oppforinger: [(jurymedlem, score, kommentar, sist_endret), ...] for
+    ÉT (butikk, kriterium) – typisk fra grupper_vurderinger()[(butikk,
+    kriterium)]. Regner ut hva som skal stå i DEN FARGEDE FANENS celle:
+    snittet av tallscorene (normalt er det bare ÉN person tildelt et
+    kriterium, så snittet blir rett og slett personens egen score) – ellers
+    IKKE_VURDERT hvis noen har satt det og ingen tallscore finnes – ellers
+    None (ingen vurdering ennå, cellen skal stå tom). Kommentaren til hver
+    bidragsyter settes sammen til ett celle-notat (én linje per person), slik
+    at ingenting forsvinner når flere jurymedlemmer deler samme kriterium.
+    Returnerer (verdi, notat_tekst)."""
+    tall = [normalize_score(s) for _, s, _, _ in oppforinger if er_tall(s)]
+    if tall:
+        snitt = sum(tall) / len(tall)
+        verdi = int(snitt) if float(snitt).is_integer() else round(snitt, 2)
+    elif any(normalize_score(s) == IKKE_VURDERT for _, s, _, _ in oppforinger):
+        verdi = IKKE_VURDERT
+    else:
+        verdi = None
+    notat_tekst = "\n".join(f"{jurymedlem}: {kommentar}" for jurymedlem, _, kommentar, _ in oppforinger if kommentar)
+    return verdi, notat_tekst

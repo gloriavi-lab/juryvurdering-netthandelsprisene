@@ -1,28 +1,33 @@
 """All lesing/skriving mot Google Sheets.
 
-VIKTIG – hvilken fane er hvilken (spør ikke, les her først – dette har vært
-kilde til forvirring i brukertesting):
+VIKTIG – hvilken fane er hvilken, og hvilken er AKTIV (les her først –
+dette har vært kilde til reell forvirring i brukertesting, se historikken i
+git-loggen for sheets.py hvis du lurer på hvorfor dette har endret seg):
 
-- "Vurderinger" (VURDERINGER_FANE) er ENESTE sted appen skriver og leser
-  jurys score+kommentar fra, i dagens modell (én rad per butikk + jurymedlem
-  + kriterium – se read_vurderinger/upsert_vurdering lenger ned). Dette er
-  fasiten for alt som vises i pages/vurdering.py.
-- "Generelle kommentarer" (GENERELLE_KOMMENTARER_FANE) er tilsvarende eneste
-  sted for butikk-nivå-kommentarer (flere jurymedlemmer kan ha hver sin).
+- FASE2_FANE ("Rangering ekspertvurdering") ER DEN AKTIVE FANEN – den
+  fargede fanen i samme stil som resten av regnearket, som jury og
+  administrasjon faktisk jobber i og ser. Scoren for hvert (butikk,
+  kriterium) står DIREKTE i cellen, som et TALL (eller teksten
+  "Kan ikke vurdere"), og kommentaren ligger som et celle-NOTAT på samme
+  celle. Appen skriver hit ved hver lagring (skriv_mange_til_farget_fane) og
+  LESER også herfra for alt den viser (read_ratings) – manuelle rettelser
+  direkte i arket vises derfor i appen ved neste lasting.
+- "Vurderinger" (VURDERINGER_FANE) er en LOGG, ikke det appen viser: én rad
+  per butikk + jurymedlem + kriterium, oppdatert ved hver lagring (se
+  upsert_vurdering/read_vurderinger). Finnes for historikk/sporbarhet og for
+  å kunne regne ut riktig verdi når flere jurymedlemmer deler ett kriterium
+  (se data.offisiell_celleverdi) – IKKE for visning i appen.
+- "Generelle kommentarer" (GENERELLE_KOMMENTARER_FANE) er butikk-nivå-
+  kommentarer (flere jurymedlemmer kan ha hver sin) – egen, liten logg, ikke
+  del av den fargede fanen (den har ingen naturlig énkelt-celle for en
+  kommentar som ikke hører til ett bestemt kriterium).
 - FASE1_FANE ("Rangering juryvurdering") leses KUN for butikklistens
-  grunndata (Butikk/Klasse/Bransje/URL via read_stores) – aldri skrevet til,
-  og inneholder ingen jury-scorer i dagens modell.
-- FASE2_FANE ("Rangering ekspertvurdering") er en ELDRE, FORLATT fane fra
-  FØR "Vurderinger"-modellen fantes (den gamle modellen brukte ett stort
-  rutenett + celle-notater, se migrer_til_vurderinger_fane() lenger ned som
-  kopierte gammelt innhold derfra OVER i "Vurderinger"). Den fjernes ikke
-  automatisk av koden, men appen leser/skriver ALDRI til den lenger – data
-  som står der er historisk og kan være eldre enn det som faktisk vises i
-  appen i dag. Dens "Jurymedlem"-kolonne er tom fordi DEN modellen aldri
-  brukte den (hver ekspert dekket ett fast fagfelt for alle butikker, ikke
-  én-butikk-om-gangen som i dagens modell) – det er forventet, ikke en feil.
-  En eventuell "Rangering fase 2"-fane er bare det gamle NAVNET på akkurat
-  denne samme fanen (se _GAMLE_NAVN under) – ikke en tredje, egen datakilde.
+  grunndata (Butikk/Klasse/Bransje/URL via read_stores) – aldri skrevet til.
+  Fortsatt i aktiv bruk, IKKE en arkiv-fane, selv om navnet kan forveksles
+  med FASE2_FANE.
+- Alle andre faner som måtte hete noe i stil med "Rangering ..." og som
+  IKKE er en av de fire over, er historiske levninger appen ikke rører –
+  merkes "ARKIV – " i Innstillinger (aldri slettet automatisk).
 
 Regnearket er ellers fasiten for struktur – appen bygger ALDRI nye
 faner/kolonner utover det som er eksplisitt dokumentert her, og finner alltid
@@ -31,13 +36,12 @@ aldri radnummer) når den skriver til en eksisterende fane.
 """
 
 import re
-from datetime import datetime
 
 import gspread
 import streamlit as st
 from google.oauth2.service_account import Credentials
 
-from data import FAGFELT, IKKE_VURDERT, KRITERIER_PER_FAGFELT
+from data import FAGFELT, IKKE_VURDERT, KRITERIER_PER_FAGFELT, grupper_vurderinger, naa_norsk, offisiell_celleverdi
 
 FASE1_FANE = "Rangering juryvurdering"  # tidligere "Rangering fase 1" – omdøpt etter avtale (ny fase-nummerering, se jury.py/Faser-fanen)
 FASE2_FANE = "Rangering ekspertvurdering"  # tidligere "Rangering fase 2"
@@ -435,7 +439,7 @@ def upsert_rating(sh, butikk_navn, jurymedlem, fagfelt, vurderinger, kommentar="
         raise ValueError(f"Fant ikke «{butikk_navn}» i '{ws.title}' – kan ikke lagre.")
     rad_nr = butikker[butikk_navn]["rad"]
 
-    tidsstempel = datetime.now().strftime("%Y-%m-%d %H:%M")
+    tidsstempel = naa_norsk().strftime("%Y-%m-%d %H:%M")
     oppdateringer = []
     for kriterium, score in vurderinger:
         kolonne = krit.get((fagfelt, kriterium))
@@ -452,7 +456,87 @@ def upsert_rating(sh, butikk_navn, jurymedlem, fagfelt, vurderinger, kommentar="
 
     if oppdateringer:
         ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
+    _rå_formatert.clear()
     read_ratings.clear()
+
+
+def skriv_mange_til_farget_fane(sh, butikk, verdier_og_notater: list):
+    """Skriver DEN OFFISIELLE verdien for flere kriterier samtidig direkte
+    til den fargede fanen for gjeldende fase (FASE2_FANE) – dette ER fanen
+    jury og administrasjon faktisk jobber i og ser, så den må alltid speile
+    det "Vurderinger"-loggen til enhver tid mener er riktig verdi (se
+    data.offisiell_celleverdi). ÉTT batch_update-kall for selve scorene
+    (value_input_option=USER_ENTERED, slik at tall faktisk blir TALL i
+    arket – ikke tekst), pluss ett insert_note/clear_note-kall per celle for
+    kommentaren (gspread har ingen batch-variant for notater).
+
+    verdier_og_notater: liste av (fagfelt, kriterium, verdi, notat_tekst).
+    verdi er et tall, IKKE_VURDERT-teksten, eller None (tømmer cellen).
+    Returnerer {kriterium: a1-celle} for de som faktisk ble skrevet – brukes
+    til å lese akkurat disse cellene tilbake for å bekrefte lagringen."""
+    ws = _sikre_fase2_fane(sh)
+    grunn, krit, _ = _header_data(ws)
+    butikker, _ = _les_butikkliste(ws, grunn)
+    if butikk not in butikker:
+        raise ValueError(f"Fant ikke «{butikk}» i «{ws.title}» – kan ikke lagre.")
+    rad_nr = butikker[butikk]["rad"]
+
+    oppdateringer, notater, celler = [], [], {}
+    for fagfelt, kriterium, verdi, notat in verdier_og_notater:
+        kolonne = krit.get((fagfelt, kriterium))
+        if not kolonne:
+            raise ValueError(f"Fant ikke kolonnen for «{kriterium}» under «{fagfelt}» i «{ws.title}».")
+        celle = gspread.utils.rowcol_to_a1(rad_nr, kolonne)
+        oppdateringer.append({"range": celle, "values": [[verdi if verdi is not None else ""]]})
+        notater.append((celle, notat))
+        celler[kriterium] = celle
+
+    if oppdateringer:
+        ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
+    for celle, notat in notater:
+        try:
+            if notat:
+                ws.insert_note(celle, notat)
+            else:
+                ws.clear_note(celle)
+        except Exception:
+            pass  # notatet er kun en bekvemmelighet – skal aldri blokkere selve scoren
+    _rå_formatert.clear()  # read_ratings/_les_butikkliste leser via denne – MÅ tømmes, ikke bare read_ratings sin egen cache
+    read_ratings.clear()
+    return celler
+
+
+def feilsok_farget_fane(sh, butikk, kriterier_med_fagfelt: list):
+    """Som feilsok_vurdering, men mot DEN FARGEDE FANEN (FASE2_FANE) – rå
+    celleverdi (med type) og celle-notat for hvert kriterium, lest helt
+    ferskt (ingen mellomlagring). kriterier_med_fagfelt: liste av
+    (fagfelt, kriterium)."""
+    from data import normalize_score
+
+    ws = _sikre_fase2_fane(sh)
+    grunn, krit, _ = _header_data(ws)
+    butikker, _ = _les_butikkliste(ws, grunn)
+    rad_nr = butikker.get(butikk, {}).get("rad")
+    formatert = ws.get_all_values(combine_merged_cells=True) if rad_nr else []
+
+    resultat = []
+    for fagfelt, kriterium in kriterier_med_fagfelt:
+        kolonne = krit.get((fagfelt, kriterium))
+        celle, rå, notat = "(fant ikke kolonnen)", None, ""
+        if rad_nr and kolonne:
+            celle = gspread.utils.rowcol_to_a1(rad_nr, kolonne)
+            rad = formatert[rad_nr - 1] if len(formatert) >= rad_nr else []
+            rå = rad[kolonne - 1] if len(rad) >= kolonne else ""
+            try:
+                notat = ws.get_note(celle) or ""
+            except Exception:
+                notat = ""
+        resultat.append({
+            "kriterium": kriterium, "fane": FASE2_FANE, "celle": celle,
+            "rå_score": rå, "rå_score_type": type(rå).__name__,
+            "rå_notat": notat, "normalisert_score": normalize_score(rå),
+        })
+    return resultat
 
 
 # ─────────────────────────────────────────────
@@ -496,7 +580,7 @@ def las_finale(sh, rader, jurymedlem):
     except gspread.WorksheetNotFound:
         ws = sh.add_worksheet(title=FINALE_SNAPSHOT_FANE, rows=100, cols=len(FINALE_SNAPSHOT_HEADER))
     ws.clear()
-    tidsstempel = datetime.now().strftime("%Y-%m-%d %H:%M")
+    tidsstempel = naa_norsk().strftime("%Y-%m-%d %H:%M")
     utdata = [FINALE_SNAPSHOT_HEADER]
     for r in rader:
         utdata.append([r["klasse"], r["plass"], r["butikk"], f'{r["snitt"]:.2f}', r["antall"], jurymedlem, tidsstempel])
@@ -622,7 +706,7 @@ def upsert_kommentar(sh, butikk, jurymedlem, fagfelt, kriterium, kommentar):
             rad_nr = i
             break
 
-    tidsstempel = datetime.now().strftime("%Y-%m-%d %H:%M")
+    tidsstempel = naa_norsk().strftime("%Y-%m-%d %H:%M")
     kommentar = (kommentar or "").strip()
     if kommentar:
         verdier = [butikk, jurymedlem, fagfelt, kriterium, kommentar, tidsstempel]
@@ -721,7 +805,7 @@ def upsert_vurdering(sh, butikk, jurymedlem, fagfelt, kriterium, score, kommenta
     rader = ws.get_all_values()
     rad_nr, _ = _finn_vurdering_rad(rader, butikk, jurymedlem, kriterium)
 
-    tidsstempel = datetime.now().strftime("%Y-%m-%d %H:%M")
+    tidsstempel = naa_norsk().strftime("%Y-%m-%d %H:%M")
     if score:
         verdier = [butikk, jurymedlem, fagfelt, kriterium, str(score), kommentar or "", tidsstempel]
         if rad_nr:
@@ -784,7 +868,7 @@ def upsert_generell_kommentar(sh, butikk, jurymedlem, kommentar):
         if len(rad) >= 2 and rad[0] == butikk and rad[1] == jurymedlem:
             rad_nr = i
             break
-    tidsstempel = datetime.now().strftime("%Y-%m-%d %H:%M")
+    tidsstempel = naa_norsk().strftime("%Y-%m-%d %H:%M")
     if kommentar and kommentar.strip():
         verdier = [butikk, jurymedlem, kommentar.strip(), tidsstempel]
         if rad_nr:
@@ -801,7 +885,7 @@ def upsert_generell_kommentar(sh, butikk, jurymedlem, kommentar):
 def sikkerhetskopier_alle_faner(sh):
     """Dupliserer HVER fane i regnearket med et tidsstempel i navnet, FØR en
     strukturendring. Returnerer listen med nye fanenavn."""
-    tidsstempel = datetime.now().strftime("%Y%m%d-%H%M%S")
+    tidsstempel = naa_norsk().strftime("%Y%m%d-%H%M%S")
     nye_navn = []
     for ws in list(sh.worksheets()):
         if ws.title.startswith("Backup_"):
@@ -874,3 +958,85 @@ def migrer_til_vurderinger_fane(sh):
         "backup": backup_navn, "antall_for": antall_for, "antall_etter": antall_etter,
         "detaljer": f"{antall_for} enkeltscorer funnet i det gamle rutenettet, {antall_etter} rader skrevet til Vurderinger. {len(generelle_samlet)} generelle kommentarer migrert.",
     }
+
+
+def migrer_vurderinger_til_farget_fane(sh):
+    """Flytter alt som står i "Vurderinger"-loggen inn i den fargede fanen
+    (FASE2_FANE) – nødvendig etter at appen byttet fra å VISE loggen til å
+    vise/redigere den fargede fanen igjen, slik at ingenting fra loggen
+    "forsvinner" fra det jury faktisk ser. Tar sikkerhetskopi av ALT først.
+    Bruker samme offisiell_celleverdi-regel som vanlig lagring (snitt hvis
+    flere deler et kriterium). Returnerer en oppsummering med antall celler
+    skrevet og eventuelle feil (f.eks. en butikk eller et kriterium i loggen
+    som ikke lenger finnes i den fargede fanen)."""
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+    alle = read_vurderinger(sh)
+    gruppert = grupper_vurderinger(alle)
+    fagfelt_for_kriterium = {r["kriterium"]: r["fagfelt"] for r in alle}
+
+    per_butikk = {}
+    for (butikk, kriterium), oppforinger in gruppert.items():
+        verdi, notat = offisiell_celleverdi(oppforinger)
+        if verdi is None:
+            continue
+        per_butikk.setdefault(butikk, []).append((fagfelt_for_kriterium.get(kriterium, ""), kriterium, verdi, notat))
+
+    antall_skrevet, butikker_skrevet, feilet = 0, 0, []
+    for butikk, jobb in per_butikk.items():
+        try:
+            celler = skriv_mange_til_farget_fane(sh, butikk, jobb)
+            antall_skrevet += len(celler)
+            butikker_skrevet += 1
+        except Exception as e:
+            feilet.append(f"«{butikk}»: {e}")
+
+    return {
+        "backup": backup_navn, "antall_skrevet": antall_skrevet, "antall_butikker": butikker_skrevet,
+        "feilet": feilet,
+        "detaljer": f"{antall_skrevet} celler skrevet til «{FASE2_FANE}» fordelt på {butikker_skrevet} butikker." + (f" {len(feilet)} feilet." if feilet else ""),
+    }
+
+
+def fane_oversikt(sh):
+    """Lister ALLE faner i regnearket med en kort forklaring på hva appen
+    bruker den til (eller ikke) – til Innstillinger, slik at det alltid er
+    synlig nøyaktig hvilken fane som er aktiv kontra en gammel levning.
+    Rører ingenting, kun lesing."""
+    kjente = {
+        FASE2_FANE: ("AKTIV", f"Appen leser og skriver hit – score som tall, kommentar som celle-notat."),
+        FASE1_FANE: ("I bruk", "Kilde til butikklisten (Butikk/Klasse/Bransje/URL) – aldri skrevet til."),
+        VURDERINGER_FANE: ("Logg", "Oppdateres ved hver lagring – IKKE det som vises i skjemaet."),
+        GENERELLE_KOMMENTARER_FANE: ("Logg", "Generelle butikk-kommentarer per jurymedlem."),
+        KOMMENTARER_FANE: ("Gammel logg", "Fra en tidligere modell – ikke lenger lest eller skrevet."),
+        "Jury": ("I bruk", "Jurymedlemmer og kriterietildeling."),
+        "Kriterier": ("I bruk", "Kriterietekster og skalaforklaringer."),
+        "Veiledning": ("I bruk", "Veiledningstekst vist på Vurdering-siden."),
+        "Faser": ("I bruk", "Fasestatus/-tidslinje."),
+        FINALE_SNAPSHOT_FANE: ("I bruk", "Finale-lås – kun til stede hvis finalen er låst."),
+    }
+    resultat = []
+    for ws in sh.worksheets():
+        navn = ws.title
+        if navn in kjente:
+            status, forklaring = kjente[navn]
+        elif navn.startswith("ARKIV – "):
+            status, forklaring = ("Arkivert", "Allerede merket som arkiv.")
+        elif navn.startswith("Backup_"):
+            status, forklaring = ("Sikkerhetskopi", "Automatisk sikkerhetskopi, aldri rørt av appen.")
+        else:
+            status, forklaring = ("Ukjent", "Ikke brukt av appen i dagens modell – kandidat for arkiv-merking.")
+        resultat.append({"navn": navn, "status": status, "forklaring": forklaring, "kan_arkiveres": status == "Ukjent"})
+    return resultat
+
+
+def merk_som_arkiv(sh, fane_navn):
+    """Gir fanen prefikset «ARKIV – » i tittelen – endrer INGENTING annet
+    (ingen data, ingen formatering, slettes ikke). Kalles kun fra
+    Innstillinger, kun for faner fane_oversikt() selv har merket som
+    "Ukjent" – rører aldri en fane appen faktisk bruker."""
+    if fane_navn.startswith("ARKIV – "):
+        return fane_navn
+    ws = sh.worksheet(fane_navn)
+    nytt_navn = f"ARKIV – {fane_navn}"[:99]
+    ws.update_title(nytt_navn)
+    return nytt_navn

@@ -12,9 +12,10 @@ from jury import (
     write_jury,
 )
 from sheets import (
-    FASE1_FANE, FASE2_FANE, er_finale_last, feilsok_vurdering, finale_las_info, fjern_finale_las,
-    legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, migrer_til_vurderinger_fane, read_fase1_scores,
-    read_ratings, read_stores, read_vurderinger, sikkerhetskopier_alle_faner, test_tilkobling, VURDERINGER_FANE,
+    FASE1_FANE, FASE2_FANE, er_finale_last, fane_oversikt, feilsok_farget_fane, feilsok_vurdering, finale_las_info,
+    fjern_finale_las, legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, merk_som_arkiv,
+    migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane, read_fase1_scores, read_ratings, read_stores,
+    read_vurderinger, sikkerhetskopier_alle_faner, test_tilkobling, VURDERINGER_FANE,
 )
 from theme import FAGFELT_FARGE
 
@@ -87,18 +88,21 @@ if advarsler:
 
 st.divider()
 st.subheader("Datamodell", anchor=False)
+st.success(
+    f"**Aktiv fane: «{FASE2_FANE}»** – appen leser og skriver score (som tall) og kommentar (som celle-notat) "
+    "DIREKTE hit, i samme rad/kolonne-oppsett som resten av regnearket. Manuelle rettelser dere gjør her "
+    "vises i appen ved neste lasting.",
+    icon=":material/check_circle:",
+)
 try:
     antall_vurderinger = len(read_vurderinger(sh))
 except Exception:
     antall_vurderinger = 0
-if antall_vurderinger > 0:
-    st.success(f"«{VURDERINGER_FANE}»-fanen er i bruk – {antall_vurderinger} lagrede vurderinger.", icon=":material/check_circle:")
-else:
-    st.warning(
-        f"«{VURDERINGER_FANE}»-fanen er tom. Hvis dere allerede har vurderinger liggende i det gamle "
-        f"«{FASE2_FANE}»-rutenettet, må de flyttes hit før jury fortsetter å jobbe i appen.",
-        icon=":material/warning:",
-    )
+st.caption(
+    f"«{VURDERINGER_FANE}» er en LOGG (ikke det som vises) – {antall_vurderinger} rader der nå. Brukes til å "
+    "regne ut riktig snitt når flere jurymedlemmer deler ett kriterium, og som sikkerhet hvis noe må "
+    "spores tilbake."
+)
 
 bkc1, bkc2 = st.columns(2)
 if bkc1.button("Ta sikkerhetskopi av alle faner nå", icon=":material/backup:", use_container_width=True):
@@ -106,8 +110,48 @@ if bkc1.button("Ta sikkerhetskopi av alle faner nå", icon=":material/backup:", 
         nye_navn = sikkerhetskopier_alle_faner(sh)
     st.success(f"{len(nye_navn)} faner sikkerhetskopiert: {', '.join(nye_navn)}", icon=":material/check_circle:")
 
-if bkc2.button("Flytt data til «Vurderinger»-fanen", icon=":material/database:", use_container_width=True, type="primary" if antall_vurderinger == 0 else "secondary"):
-    st.session_state["_vis_migrer_dialog"] = True
+if bkc2.button(f"Flytt «{VURDERINGER_FANE}»-logg inn i «{FASE2_FANE}»", icon=":material/database:", use_container_width=True, type="primary"):
+    st.session_state["_vis_migrer_til_farget_dialog"] = True
+
+
+@st.dialog(f"Flytte «{VURDERINGER_FANE}»-logg inn i «{FASE2_FANE}»?")
+def migrer_til_farget_dialog():
+    st.write(
+        f"Dette tar FØRST sikkerhetskopi av absolutt alle faner, deretter regner ut riktig verdi for hvert "
+        f"(butikk, kriterium) i «{VURDERINGER_FANE}» (snitt hvis flere jurymedlemmer deler kriteriet) og "
+        f"skriver det inn i riktig celle i «{FASE2_FANE}», med kommentaren(e) som celle-notat. "
+        f"Ingenting slettes fra «{VURDERINGER_FANE}» – den fortsetter som logg."
+    )
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True, key="avbryt_migrer_farget"):
+        st.rerun()
+    if c2.button("Ja, flytt nå", type="primary", use_container_width=True, icon=":material/database:", key="bekreft_migrer_farget"):
+        with st.spinner("Sikkerhetskopierer og flytter data …"):
+            resultat = migrer_vurderinger_til_farget_fane(sh)
+        st.session_state["_migrering_til_farget_resultat"] = resultat
+        st.rerun()
+
+
+if st.session_state.get("_vis_migrer_til_farget_dialog"):
+    st.session_state["_vis_migrer_til_farget_dialog"] = False
+    migrer_til_farget_dialog()
+
+if st.session_state.get("_migrering_til_farget_resultat"):
+    r = st.session_state.pop("_migrering_til_farget_resultat")
+    st.success(f"Ferdig! {r['detaljer']}", icon=":material/check_circle:")
+    st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
+    if r["feilet"]:
+        with st.expander(f"{len(r['feilet'])} kunne ikke skrives"):
+            for feil in r["feilet"]:
+                st.markdown(f"- {feil}")
+
+with st.expander(f"Eldre verktøy: flytt «{FASE2_FANE}» → «{VURDERINGER_FANE}» (motsatt retning)", icon=":material/history:"):
+    st.caption(
+        f"Fra en tidligere runde, da «{VURDERINGER_FANE}» var det appen viste. Nyttig kun hvis noen har "
+        f"rettet tall direkte i «{FASE2_FANE}» og dere også vil ha det i loggen."
+    )
+    if st.button(f"Flytt data fra «{FASE2_FANE}» til «{VURDERINGER_FANE}»", icon=":material/database:", use_container_width=True):
+        st.session_state["_vis_migrer_dialog"] = True
 
 
 @st.dialog("Flytte data til Vurderinger-fanen?")
@@ -115,7 +159,7 @@ def migrer_dialog():
     st.write(
         "Dette tar FØRST sikkerhetskopi av absolutt alle faner i regnearket, deretter leser alle "
         f"eksisterende scorer/kommentarer fra «{FASE2_FANE}»-rutenettet og den gamle «Kommentarer»-fanen, "
-        "og skriver dem inn i den nye «Vurderinger»-fanen. Ingen rader slettes eller går tapt – "
+        "og skriver dem inn i «Vurderinger»-fanen. Ingen rader slettes eller går tapt – "
         "originalen ligger urørt i sikkerhetskopien."
     )
     st.caption(
@@ -143,15 +187,35 @@ if st.session_state.get("_migrering_resultat"):
     st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
 
 st.divider()
-with st.expander(f"Eldre, forlatt fane: «{FASE2_FANE}» (ikke i bruk lenger)", icon=":material/history:"):
-    st.warning(
-        f"Appen leser og skriver ALDRI til «{FASE2_FANE}» lenger – «{VURDERINGER_FANE}» (over) er eneste "
-        "kilde til sannhet i dagens modell. Denne seksjonen er kun her for den som fortsatt har det gamle "
-        "regnearket oppe og lurer på hva knappene under gjorde i den tidligere arkitekturen. Data som "
-        f"står i «{FASE2_FANE}» i dag kan være ELDRE enn det jury faktisk har lagret i appen – se "
-        "«Feilsøking lagring» lenger ned for å slå opp hva som faktisk er lagret for en gitt butikk.",
-        icon=":material/warning:",
+st.subheader("Faner i regnearket", anchor=False)
+st.caption("Alle faner, og hva appen bruker hver av dem til – slik at det alltid er synlig hva som er aktivt kontra gamle levninger. Ingenting slettes noensinne herfra.")
+try:
+    faner = fane_oversikt(sh)
+except Exception as e:
+    faner = []
+    st.error(f"Kunne ikke liste faner: {e}", icon=":material/error:")
+
+if faner:
+    st.dataframe(
+        [{"Fane": f["navn"], "Status": f["status"], "Forklaring": f["forklaring"]} for f in faner],
+        hide_index=True, use_container_width=True,
     )
+    kandidater = [f["navn"] for f in faner if f["kan_arkiveres"]]
+    if kandidater:
+        valgte = st.multiselect(f"Merk valgte som «ARKIV – »", kandidater, key="_arkiver_valgte")
+        if valgte and st.button(f"Merk {len(valgte)} fane(r) som ARKIV", icon=":material/archive:"):
+            merket = []
+            for navn in valgte:
+                try:
+                    merket.append(merk_som_arkiv(sh, navn))
+                except Exception as e:
+                    st.error(f"Kunne ikke merke «{navn}»: {e}", icon=":material/error:")
+            if merket:
+                st.success(f"Merket: {', '.join(merket)}", icon=":material/check_circle:")
+                st.rerun()
+
+st.divider()
+with st.expander(f"Opprett «{FASE2_FANE}» manuelt", icon=":material/content_copy:"):
     st.caption(
         f"«{FASE2_FANE}» opprettes automatisk (som en nøyaktig kopi av «{FASE1_FANE}» – samme farger, "
         "sammenslåinger, nedtrekkslister og filter) første gang noen lagrer en vurdering, eller når du trykker knappen under."
@@ -186,9 +250,9 @@ st.divider()
 st.subheader("Feilsøking lagring", anchor=False)
 st.markdown(f"Tilkoblet regneark akkurat nå: **{sh.title}** (ID `{sh.id}`)")
 st.caption(
-    f"Slår opp nøyaktig det appen leser fra «{VURDERINGER_FANE}»-fanen for ÉN butikk + ETT jurymedlem – "
-    "rå verdi fra arket (med type), normalisert verdi, og hva skjemaet faktisk ville vist. Leser alltid "
-    "ferskt (hopper forbi mellomlagringen), så dette viser nøyaktig det som står i arket akkurat nå."
+    f"Slår opp nøyaktig det appen leser for ÉN butikk + ETT jurymedlem, i BÅDE den fargede fanen (det som "
+    f"faktisk vises) og «{VURDERINGER_FANE}»-loggen – rå verdi (med type), normalisert verdi, og hva skjemaet "
+    "faktisk ville vist. Leser alltid ferskt (hopper forbi mellomlagringen)."
 )
 fdc1, fdc2 = st.columns(2)
 feilsok_jurymedlem = fdc1.selectbox("Jurymedlem", navn_liste_jury, key="_feilsok_jurymedlem") if navn_liste_jury else None
@@ -199,17 +263,34 @@ if feilsok_jurymedlem and feilsok_butikk:
     if not mine_krit:
         st.info(f"{feilsok_jurymedlem} har ingen kriterier tildelt.", icon=":material/info:")
     else:
-        rader_feilsok = feilsok_vurdering(sh, feilsok_butikk, feilsok_jurymedlem, mine_krit)
+        krit_til_fagfelt_fs = {k: felt for felt, kriterier in felt_dict.items() for k in kriterier}
+
+        st.markdown(f"**Den fargede fanen («{FASE2_FANE}») – det som faktisk vises i appen**")
+        rader_grid = feilsok_farget_fane(sh, feilsok_butikk, [(krit_til_fagfelt_fs.get(k, ""), k) for k in mine_krit])
         st.dataframe(
             [
                 {
-                    "Kriterium": r["kriterium"], "Fane": r["fane"], "Celle": r["celle"],
+                    "Kriterium": r["kriterium"], "Celle": r["celle"],
                     "Rå verdi": r["rå_score"], "Type": r["rå_score_type"],
-                    "Normalisert": r["normalisert_score"], "Kommentar (rå)": r["rå_kommentar"],
+                    "Normalisert": r["normalisert_score"], "Notat": r["rå_notat"],
                     "Ville vist i skjema": (
                         "– (ikke besvart)" if r["normalisert_score"] is None
                         else ("Kan ikke vurdere" if r["normalisert_score"] == "Kan ikke vurdere" else f"{r['normalisert_score']} markert")
                     ),
+                }
+                for r in rader_grid
+            ],
+            hide_index=True, use_container_width=True,
+        )
+
+        st.markdown(f"**«{VURDERINGER_FANE}»-loggen – {feilsok_jurymedlem} sine egne rader**")
+        rader_feilsok = feilsok_vurdering(sh, feilsok_butikk, feilsok_jurymedlem, mine_krit)
+        st.dataframe(
+            [
+                {
+                    "Kriterium": r["kriterium"], "Celle": r["celle"],
+                    "Rå verdi": r["rå_score"], "Type": r["rå_score_type"],
+                    "Normalisert": r["normalisert_score"], "Kommentar (rå)": r["rå_kommentar"],
                 }
                 for r in rader_feilsok
             ],
