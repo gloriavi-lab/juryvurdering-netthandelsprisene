@@ -20,7 +20,7 @@ tilbake" og at en score kunne se ut til å forsvinne."""
 
 import streamlit as st
 
-from components import fremdriftslinje, klasse_badge, lagringsstatus, status_merkelapp_html, topptekst, tom_tilstand
+from components import fremdriftslinje, klasse_badge, lagringsstatus, scroll_til_toppen, status_merkelapp_html, topptekst, tom_tilstand
 from data import IKKE_VURDERT, grupper_vurderinger, mine_scorer, naa_norsk, normalize_score, offisiell_celleverdi, status_for_scorer
 from jury import aktive_kriterier, beskriv_tildeling, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
 from sheets import (
@@ -30,6 +30,14 @@ from sheets import (
 from theme import FAGFELT_FARGE, STATUS_FARGE, STATUS_TEKST, STATUS_TONE
 
 topptekst("Vurdering")
+
+# st.toast kalt INNE i en on_click-callback (se knappene lenger ned) er ikke
+# garantert å rendres riktig – den callbacken kjører FØR denne scriptkjøringen
+# i det hele tatt starter. Derfor: callbacken setter bare et flagg, og selve
+# toast-kallet skjer her, tidlig i en vanlig scriptkjøring, uansett om vi
+# etterpå havner på lista eller i vurderingsvisningen.
+if st.session_state.pop("_toast_etter_rerun", None):
+    st.toast("Lagret ✓", icon=":material/check_circle:")
 
 sh = st.session_state.get("_sh")
 if not sh:
@@ -326,6 +334,9 @@ def vis_vurderingsvisning():
     info = butikker[navn]
     i = navn_liste_butikker.index(navn)
 
+    if st.session_state.pop("_scroll_til_topp", False):
+        scroll_til_toppen()
+
     if st.button("← Alle mine butikker", icon=":material/arrow_back:"):
         st.session_state["_apnet_butikk"] = None
         st.rerun()
@@ -341,14 +352,22 @@ def vis_vurderingsvisning():
         if info.get("url"):
             st.link_button("Besøk butikk", info["url"], icon=":material/open_in_new:", use_container_width=True)
 
+    # Bevisst INGEN key= her: en nøkkel ville gitt widgeten sin egen
+    # session_state-verdi, og Streamlit tillater IKKE at noe (f.eks.
+    # _bytt_til, kalt fra knappene under) skriver til den etter at widgeten
+    # alt er tegnet i samme kjøring ("cannot be modified after the widget …
+    # is instantiated" – en reell feil jeg traff under testing). Uten key=
+    # leser den i stedet alltid index=i fra den FAKTISK åpne butikken
+    # (satt trygt av _bytt_til i forrige kjøring, via _apnet_butikk), og
+    # fanger fortsatt opp når BRUKEREN selv velger noe annet i den.
     hopp_til = st.selectbox(
         "Hopp direkte til en annen butikk", navn_liste_butikker,
-        index=i, key="_hopp_til_butikk",
-        format_func=lambda n: f"{_gyldig_status_tekst(n).split(' ')[0]} {n}",
+        index=i, format_func=lambda n: f"{_gyldig_status_tekst(n).split(' ')[0]} {n}",
     )
     if hopp_til != navn:
         lagre_denne(navn)
         _bytt_til(hopp_til)
+        st.session_state["_scroll_til_topp"] = True
         st.rerun()
 
     st.write("")
@@ -402,23 +421,37 @@ def vis_vurderingsvisning():
     if tilstand:
         lagringsstatus(tilstand[0], tilstand[1])
 
-    # NB: disse rerunner HELE siden (ikke scope="fragment"), bevisst – de
-    # følger alltid etter en lagre_denne()-skriving. alle_vurderinger/
-    # mine_oppslag/statuskortene øverst beregnes KUN i toppen av scriptet,
-    # UTENFOR dette fragmentet, så en fragment-rerun ville aldri sett det
-    # som nettopp ble lagret (det var den reelle årsaken til at en butikk
-    # kunne vise "ingen score markert" rett etter lagring – scriptet hadde
-    # bare ikke kjørt på nytt ennå og viste fortsatt den gamle, før-lagring
-    # dataen, se bruker-rapportert feil).
-    a1, a2 = st.columns(2)
+    # NB: IKKE on_click-callbacks her – Streamlit behandler st.rerun() kalt
+    # INNE i en on_click-callback som en no-op (bekreftet empirisk: en
+    # tidligere callback-basert variant viste Streamlit sin egen advarsel
+    # "Calling st.rerun() within a callback is a no-op" i nettleseren, og
+    # endte opp med å aldri faktisk bytte butikk). Vanlig
+    # if-knapp-klikket-sjekk, med session_state satt FØR st.rerun() kalles
+    # fra selve scriptkroppen, fungerer korrekt. Alle tre kaller en VANLIG
+    # st.rerun() (ikke scope="fragment") – mine_oppslag/fargede_fane_data/
+    # statuskortene beregnes KUN øverst i scriptet, utenfor dette
+    # fragmentet, så en fragment-rerun ville aldri sett det som nettopp ble
+    # lagret.
+    a1, a2, a3 = st.columns([1, 1.2, 1])
     if a1.button("← Forrige", disabled=(i == 0), use_container_width=True):
         lagre_denne(navn)
         _bytt_til(navn_liste_butikker[max(0, i - 1)])
+        st.session_state["_scroll_til_topp"] = True
         st.rerun()
-    if a2.button("💾 Lagre og neste", type="primary", use_container_width=True):
+    if a2.button("💾 Lagre og neste →", type="primary", use_container_width=True):
         if lagre_denne(navn):
-            st.toast("Lagret ✓", icon=":material/check_circle:")
-            _bytt_til(neste_uferdige(navn) or navn)
+            st.session_state["_toast_etter_rerun"] = True
+            neste = neste_uferdige(navn)
+            if neste:
+                _bytt_til(neste)
+                st.session_state["_scroll_til_topp"] = True
+            else:
+                st.session_state["_apnet_butikk"] = None
+        st.rerun()
+    if a3.button("Lagre og lukk", use_container_width=True):
+        if lagre_denne(navn):
+            st.session_state["_toast_etter_rerun"] = True
+            st.session_state["_apnet_butikk"] = None
         st.rerun()
 
 
@@ -435,10 +468,22 @@ def vis_butikkliste():
     fane_valg = [("gjenstar", f"Gjenstår ({antall_gjenstar})"), ("pabegynt", f"Påbegynt ({antall_pabegynt})"), ("ferdig", f"Ferdig ({antall_ferdig})"), ("alle", "Alle")]
     fc1, fc2 = st.columns([3, 2])
     with fc1:
+        # Streamlit nullstiller et NØKLET widgets session_state-verdi hvis
+        # widgeten ikke blir rendret i en kjøring – og mens en butikk er
+        # åpen, kjøres IKKE vis_butikkliste() (og dermed ikke dette
+        # segmented_control-kallet) i det hele tatt. Uten mellomlageret under
+        # ville valgt fane derfor «glemmes» hver gang man åpnet en butikk og
+        # kom tilbake (bekreftet med en isolert repro under testing – fanen
+        # hoppet til "Gjenstår" etter «Lagre og lukk», selv med key= satt).
+        # "_vurdering_fane_sist" er en VANLIG session_state-nøkkel (ikke
+        # bundet til noe widget), så den overlever uansett.
+        if "_vurdering_fane" not in st.session_state:
+            st.session_state["_vurdering_fane"] = st.session_state.get("_vurdering_fane_sist", "gjenstar")
         fane = st.segmented_control(
-            "Fane", [v for v, _ in fane_valg], key="_vurdering_fane", default="gjenstar",
+            "Fane", [v for v, _ in fane_valg], key="_vurdering_fane",
             format_func=dict(fane_valg).get, label_visibility="collapsed",
         )
+        st.session_state["_vurdering_fane_sist"] = fane
     with fc2:
         sok = st.text_input("Søk", placeholder="Søk etter butikk …", icon=":material/search:", label_visibility="collapsed")
 

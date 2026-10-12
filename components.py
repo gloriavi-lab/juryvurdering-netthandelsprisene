@@ -108,6 +108,26 @@ def onboarding_steg(aktivt_steg: int):
     st.markdown(html, unsafe_allow_html=True)
 
 
+def scroll_til_toppen():
+    """Scroller selve appvinduet (ikke bare en iframe) til toppen – brukt når
+    man bytter til en ny butikk etter «Lagre og neste», slik at man ikke står
+    midt nede i forrige butikks lange skjema. st.rerun() alene bevarer ofte
+    scroll-posisjonen når den nye siden har omtrent samme høyde som forrige.
+    Prøver flere selektorer siden Streamlit sin DOM-struktur kan variere
+    mellom versjoner – ufarlig å bomme på én, de andre tar over."""
+    import streamlit.components.v1 as components
+    components.html(
+        "<script>"
+        "var w = window.parent;"
+        "w.scrollTo(0, 0);"
+        "if (w.document.documentElement) { w.document.documentElement.scrollTop = 0; }"
+        "var main = w.document.querySelector('section.main') || w.document.querySelector('[data-testid=\"stAppViewContainer\"]');"
+        "if (main) { main.scrollTo(0, 0); main.scrollTop = 0; }"
+        "</script>",
+        height=0,
+    )
+
+
 def tom_tilstand(ikon: str, tittel: str, tekst: str):
     st.markdown(
         f'<div class="tom-tilstand"><div class="ikon">{ikon}</div>'

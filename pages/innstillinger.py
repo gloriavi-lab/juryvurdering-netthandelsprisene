@@ -13,9 +13,10 @@ from jury import (
 )
 from sheets import (
     FASE1_FANE, FASE2_FANE, er_finale_last, fane_oversikt, feilsok_farget_fane, feilsok_vurdering, finale_las_info,
-    fjern_finale_las, legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, merk_som_arkiv,
+    fjern_finale_las, KOMMENTARER_FANE, legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, merk_som_arkiv,
     migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane, read_fase1_scores, read_ratings, read_stores,
-    read_vurderinger, sikkerhetskopier_alle_faner, test_tilkobling, VURDERINGER_FANE,
+    read_vurderinger, sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner, test_tilkobling,
+    VURDERINGER_FANE,
 )
 from theme import FAGFELT_FARGE
 
@@ -185,6 +186,46 @@ if st.session_state.get("_migrering_resultat"):
     r = st.session_state.pop("_migrering_resultat")
     st.success(f"Ferdig! {r['detaljer']}", icon=":material/check_circle:")
     st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
+
+st.divider()
+st.subheader("Kommentar-oversikt", anchor=False)
+st.caption(
+    f"«{KOMMENTARER_FANE}» slutter å bli skrevet til av appen når kommentarer flyttet inn i «{VURDERINGER_FANE}» "
+    f"– den sto igjen med gamle testrader. Knappen under tar sikkerhetskopi, tømmer «{KOMMENTARER_FANE}» og setter "
+    f"den opp som en LIVE formelvisning av «{VURDERINGER_FANE}» (QUERY i celle A2) – Google Sheets holder den "
+    "oppdatert av seg selv, appen skriver aldri hit igjen."
+)
+if st.button(f"Sett opp «{KOMMENTARER_FANE}» som automatisk formelvisning", icon=":material/table_view:"):
+    st.session_state["_vis_kommentar_formel_dialog"] = True
+
+
+@st.dialog(f"Sette opp «{KOMMENTARER_FANE}» som formelvisning?")
+def kommentar_formel_dialog():
+    st.write(
+        f"Dette tar FØRST sikkerhetskopi av alle faner, tømmer deretter «{KOMMENTARER_FANE}» helt (de gamle "
+        f"testradene forsvinner fra selve fanen, men ligger urørt i sikkerhetskopien), og setter inn header + "
+        f"én QUERY-formel i A2 som henter Butikk, Jurymedlem, Fagfelt, Kriterium, Score, Kommentar og Sist "
+        f"endret fra «{VURDERINGER_FANE}» for alle rader med kommentar, sortert på butikk."
+    )
+    st.caption("Formelen bruker semikolon (;) som skilletegn – vanlig for norsk regnearkspråk. Gir den #ERROR!/#NAME?, si ifra så retter jeg den til komma.")
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True, key="avbryt_kommentar_formel"):
+        st.rerun()
+    if c2.button("Ja, sett opp nå", type="primary", use_container_width=True, icon=":material/table_view:", key="bekreft_kommentar_formel"):
+        with st.spinner("Sikkerhetskopierer og setter opp formelvisning …"):
+            backup_navn = sett_opp_kommentarer_som_formelvisning(sh)
+        st.session_state["_kommentar_formel_resultat"] = backup_navn
+        st.rerun()
+
+
+if st.session_state.get("_vis_kommentar_formel_dialog"):
+    st.session_state["_vis_kommentar_formel_dialog"] = False
+    kommentar_formel_dialog()
+
+if st.session_state.get("_kommentar_formel_resultat"):
+    backup_navn = st.session_state.pop("_kommentar_formel_resultat")
+    st.success(f"Ferdig! «{KOMMENTARER_FANE}» er nå en formelvisning.", icon=":material/check_circle:")
+    st.caption(f"Sikkerhetskopier: {', '.join(backup_navn)}")
 
 st.divider()
 st.subheader("Faner i regnearket", anchor=False)

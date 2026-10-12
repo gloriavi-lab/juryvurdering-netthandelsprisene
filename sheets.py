@@ -734,16 +734,47 @@ def upsert_kommentar(sh, butikk, jurymedlem, fagfelt, kriterium, kommentar):
         pass  # notatet er kun en bekvemmelighet – skal aldri blokkere selve lagringen
 
 
+def sett_opp_kommentarer_som_formelvisning(sh):
+    """«Kommentarer»-fanen sluttet å bli oppdatert av appen etter at
+    kommentarer flyttet til å ligge som en kolonne i «Vurderinger» (appen
+    IKKE skriver hit noen steder lenger – bekreftet med søk i hele
+    kildekoden) – den sto igjen med gamle testrader. Gjør den i stedet om
+    til en LIVE, automatisk oppdatert VISNING av «Vurderinger», med én
+    QUERY-formel i A2 som Google Sheets selv holder oppdatert – appen
+    skriver ALDRI hit igjen. Tar sikkerhetskopi FØRST, tømmer så fanen
+    (de gamle testradene forsvinner fra selve fanen, men ligger urørt i
+    sikkerhetskopien) og setter opp header + formel på nytt.
+
+    NB: formelen forutsetter at «Vurderinger» sine kolonner forblir i
+    rekkefølgen Butikk,Jurymedlem,Fagfelt,Kriterium,Score,Kommentar,
+    Sist endret (se VURDERINGER_HEADER2) – endres den rekkefølgen må
+    formelen oppdateres til match."""
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+    try:
+        ws = sh.worksheet(KOMMENTARER_FANE)
+        ws.clear()
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=KOMMENTARER_FANE, rows=200, cols=7)
+
+    ws.update([VURDERINGER_HEADER2], range_name="A1:G1")
+    formel = f"=QUERY('{VURDERINGER_FANE}'!A2:G; \"select A,B,C,D,E,F,G where F != '' order by A\"; 0)"
+    ws.update([[formel]], range_name="A2", value_input_option="USER_ENTERED")
+    try:
+        from theme import GRUNNKOLONNE_FARGE
+        ws.format("A1:G1", {"backgroundColor": _hex_til_rgb(GRUNNKOLONNE_FARGE), "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}})
+        ws.freeze(rows=1)
+    except Exception:
+        pass
+    read_kommentarer.clear()
+    return backup_navn
+
+
 # ═════════════════════════════════════════════
-# NY MODELL (etter brukertesting): én fane "Vurderinger" er eneste kilde til
-# sannhet for score+kommentar per kriterium – erstatter den tidligere delte
-# modellen (verdier i "Rangering ekspertvurdering"-rutenettet + en egen
-# "Kommentarer"-fane + celle-notater). Den delte skrivingen (to separate
-# upsert-kall per lagring, pluss notat-speiling) var rotårsaken til at en
-# slettet kommentar kunne "komme tilbake": et av stedene kunne feile eller
-# henge igjen uten at det andre visste om det. Med én fane og én upsert-
-# operasjon per rad finnes ikke det problemet lenger – og det løser også at
-# flere jurymedlemmer kan dele samme kriterium (hver får sin egen rad).
+# "Vurderinger" er LOGGEN (ikke det som vises – se VIKTIG-avsnittet øverst i
+# fila): én rad per butikk+jurymedlem+kriterium, oppdatert ved hver lagring.
+# Brukt til å regne ut riktig snitt når flere jurymedlemmer deler ett
+# kriterium (se data.offisiell_celleverdi), og som grunnlag for den
+# automatisk oppdaterte «Kommentarer»-formelvisningen over.
 # ═════════════════════════════════════════════
 VURDERINGER_FANE = "Vurderinger"
 VURDERINGER_HEADER2 = ["Butikk", "Jurymedlem", "Fagfelt", "Kriterium", "Score", "Kommentar", "Sist endret"]
