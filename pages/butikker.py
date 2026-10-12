@@ -7,7 +7,7 @@ from collections import defaultdict
 
 import streamlit as st
 
-from components import regneark_tabell, topptekst
+from components import regneark_tabell, topptekst, vis_feil
 from data import er_tall, grupper_vurderinger, normalize_score, status_for_scorer
 from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
 from sheets import read_ratings, read_stores, read_vurderinger
@@ -27,7 +27,7 @@ try:
     jury = read_jury(sh)
     kriterier_fase3 = aktive_kriterier(read_criteria(sh), fase="Fase 3")
 except Exception as e:
-    st.error(f"Kunne ikke lese regnearket: {e}", icon=":material/error:")
+    vis_feil("Kunne ikke lese regnearket", e)
     st.stop()
 
 FAGFELT = fagfelt_liste(kriterier_fase3)

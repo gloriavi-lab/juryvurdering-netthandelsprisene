@@ -20,15 +20,15 @@ tilbake" og at en score kunne se ut til å forsvinne."""
 
 import streamlit as st
 
-from components import fremdriftslinje, klasse_badge, lagringsstatus, scroll_til_toppen, status_merkelapp_html, topptekst, tom_tilstand
+from components import feilmelding_tekst, fremdriftslinje, klasse_badge, lagringsstatus, scroll_til_toppen, status_merkelapp_html, topptekst, tom_tilstand, vis_feil
 from data import IKKE_VURDERT, grupper_vurderinger, mine_scorer, naa_norsk, normalize_score, offisiell_celleverdi, status_for_scorer
 from jury import (
     aktive_kriterier, beskriv_tildeling, gjeldende_fase_streng, kriterier_per_fagfelt, mine_kriterier, read_criteria,
     read_faser, read_jury,
 )
 from sheets import (
-    feilsok_farget_fane, feilsok_vurdering, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger,
-    skriv_mange_til_farget_fane, upsert_generell_kommentar, upsert_vurdering,
+    read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger, skriv_mange_til_farget_fane,
+    upsert_generell_kommentar, upsert_mange_vurderinger,
 )
 from theme import FAGFELT_FARGE, STATUS_FARGE, STATUS_TEKST, STATUS_TONE
 
@@ -52,7 +52,7 @@ try:
     jury = read_jury(sh)
     alle_kriterier = read_criteria(sh)
 except Exception as e:
-    st.error(f"Kunne ikke lese regnearket: {e}", icon=":material/error:")
+    vis_feil("Kunne ikke lese regnearket", e)
     st.stop()
 
 # Fase-styrt butikkliste: valgfri «Fase»-kolonne i butikklistens kildefane
@@ -106,7 +106,7 @@ try:
     alle_generelle = read_generelle_kommentarer(sh)
     fargede_fane_data = read_ratings(sh)
 except Exception as e:
-    st.error(f"Kunne ikke lese vurderinger: {e}", icon=":material/error:")
+    vis_feil("Kunne ikke lese vurderinger", e)
     st.stop()
 
 # mine_oppslag (LOGGEN, "Vurderinger") brukes KUN for å seede MIN EGEN
@@ -218,9 +218,18 @@ def lagre_denne(navn):
     appen var koblet til et annet regneark enn forventet) – en try/except
     rundt selve skrive-kallet fanger ikke det, siden selve API-kallet kan gå
     helt fint mot FEIL regneark/fane. Derfor: ingen "Lagret" uten en fersk,
-    bekreftet lesing som faktisk stemmer."""
+    bekreftet lesing som faktisk stemmer.
+
+    VIKTIG (lagt til etter at appen traff Google sin lesekvote i
+    produksjon): alle kriteriene for ÉN lagring skrives nå i ETT batch-kall
+    (sheets.upsert_mange_vurderinger) i stedet for ett get_all_values()- og
+    ett skrive-kall PER KRITERIUM, og selve bekreftelsen gjenbruker de
+    vanlige, mellomlagrede read_vurderinger(sh)/read_ratings(sh) – som
+    uansett blir friske fordi skrivingen akkurat tømte cachen deres – i
+    stedet for separate, alltid-ferske feilsøkingskall. Dette endrer ANTALL
+    API-kall drastisk, IKKE hva som faktisk valideres/lagres/vises."""
     manglende_kommentar = []
-    skrevet = {}  # kriterium -> (score vi forsøkte å lagre, kommentar vi forsøkte å lagre)
+    kriterier_a_lagre = []  # (fagfelt, kriterium, score, kommentar) – validert, klar til å skrives
     for fagfelt, kriterier in mine_per_felt.items():
         for krit in kriterier:
             valg = st.session_state.get(f"seg_{navn}_{krit}")
@@ -238,30 +247,35 @@ def lagre_denne(navn):
                 manglende_kommentar.append(krit)
                 continue
 
-            try:
-                upsert_vurdering(sh, navn, jurynavn, fagfelt, krit, score, kommentar_krit)
-                skrevet[krit] = (score, kommentar_krit)
-            except Exception as e:
-                st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke skrive «{krit}»: {e}")
-                return False
+            kriterier_a_lagre.append((fagfelt, krit, score, kommentar_krit))
 
     if manglende_kommentar:
         ord = "kriterium" if len(manglende_kommentar) == 1 else "kriterier"
         st.session_state["_lagringstilstand"] = ("feil", f"{len(manglende_kommentar)} {ord} mangler kommentar: " + ", ".join(manglende_kommentar))
         return False
 
+    skrevet = {krit: (score, kommentar) for _, krit, score, kommentar in kriterier_a_lagre}
+    if kriterier_a_lagre:
+        try:
+            upsert_mange_vurderinger(sh, navn, jurynavn, [(f, k, s, c) for f, k, s, c in kriterier_a_lagre])
+        except Exception as e:
+            st.session_state["_lagringstilstand"] = ("feil", feilmelding_tekst("Kunne ikke skrive til loggen", e))
+            return False
+
     # Skriv den OFFISIELLE verdien for hvert kriterium vi nettopp lagret inn
     # i DEN FARGEDE FANEN (se DATAMODELL øverst i fila – det er DEN jury og
     # administrasjon faktisk ser og kan rette manuelt i). Regnes ut fra en
-    # FERSK lesing av loggen (upsert_vurdering har allerede tømt cachen),
+    # FERSK lesing av loggen (cachen ble akkurat tømt av skrivingen over),
     # slik at et kriterium flere jurymedlemmer deler får riktig snitt i
-    # stedet for at siste lagring bare overskriver de andres score.
+    # stedet for at siste lagring bare overskriver de andres score. Samme
+    # lesing brukes rett under til å BEKREFTE loggen – ingen ekstra kall.
     skrivejobb = []
+    fersk_vurderinger = []
     if skrevet:
         try:
             fersk_vurderinger = read_vurderinger(sh)
         except Exception as e:
-            st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke lese loggen for å oppdatere den fargede fanen: {e}")
+            st.session_state["_lagringstilstand"] = ("feil", feilmelding_tekst("Kunne ikke lese loggen for å oppdatere den fargede fanen", e))
             return False
         fersk_gruppert = grupper_vurderinger(fersk_vurderinger)
         for krit in skrevet:
@@ -270,49 +284,49 @@ def lagre_denne(navn):
         try:
             skriv_mange_til_farget_fane(sh, navn, skrivejobb)
         except Exception as e:
-            st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke skrive til den fargede fanen: {e}")
+            st.session_state["_lagringstilstand"] = ("feil", feilmelding_tekst("Kunne ikke skrive til den fargede fanen", e))
             return False
 
     generell_tekst = (st.session_state.get(f"generell_{navn}") or "").strip()
     try:
         upsert_generell_kommentar(sh, navn, jurynavn, generell_tekst)
     except Exception as e:
-        st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke skrive generell kommentar: {e}")
+        st.session_state["_lagringstilstand"] = ("feil", feilmelding_tekst("Kunne ikke skrive generell kommentar", e))
         return False
 
     avvik = []
     if skrevet:
-        try:
-            kontroll = feilsok_vurdering(sh, navn, jurynavn, list(skrevet.keys()))
-        except Exception as e:
-            st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke lese tilbake etter lagring: {e}")
-            return False
-        for rad in kontroll:
-            forventet_score, forventet_kommentar = skrevet[rad["kriterium"]]
-            if rad["normalisert_score"] != normalize_score(forventet_score):
-                avvik.append(f"«{rad['kriterium']}» i loggen: skrev {forventet_score!r}, fant {rad['rå_score']!r} i {rad['fane']} {rad['celle']}")
-            elif (rad["rå_kommentar"] or "") != (forventet_kommentar or ""):
-                avvik.append(f"«{rad['kriterium']}»: kommentaren i loggen stemmer ikke med det som ble lagret")
+        logg_oppslag = {(r["butikk"], r["kriterium"]): r for r in fersk_vurderinger if r["jurymedlem"] == jurynavn}
+        for krit, (forventet_score, forventet_kommentar) in skrevet.items():
+            rad = logg_oppslag.get((navn, krit))
+            rå_score = rad["score"] if rad else None
+            rå_kommentar = (rad["kommentar"] if rad else "") or ""
+            if normalize_score(rå_score) != normalize_score(forventet_score):
+                avvik.append(f"«{krit}» i loggen: skrev {forventet_score!r}, fant {rå_score!r}")
+            elif rå_kommentar != (forventet_kommentar or ""):
+                avvik.append(f"«{krit}»: kommentaren i loggen stemmer ikke med det som ble lagret")
 
     # Les den fargede fanen tilbake også – det er DEN som faktisk vises i
     # appen og som jury/administrasjon ser, så «Lagret» skal aldri vises
-    # uten at NETTOPP denne stemmer, ikke bare loggen.
+    # uten at NETTOPP denne stemmer, ikke bare loggen. read_ratings(sh) er
+    # mellomlagret, men skriv_mange_til_farget_fane tømte akkurat cachen,
+    # så dette er like ferskt som et eget, ekstra API-kall ville vært.
     if skrivejobb:
         try:
-            kontroll_grid = feilsok_farget_fane(sh, navn, [(fagfelt, krit) for fagfelt, krit, _, _ in skrivejobb])
+            fersk_grid = read_ratings(sh)
         except Exception as e:
-            st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke lese tilbake fra den fargede fanen: {e}")
+            st.session_state["_lagringstilstand"] = ("feil", feilmelding_tekst("Kunne ikke lese tilbake fra den fargede fanen", e))
             return False
-        forventet_verdi = {krit: verdi for _, krit, verdi, _ in skrivejobb}
-        for rad in kontroll_grid:
-            forventet = forventet_verdi.get(rad["kriterium"])
-            if rad["normalisert_score"] != forventet:
-                avvik.append(f"«{rad['kriterium']}» i {rad['fane']} {rad['celle']}: skrev {forventet!r}, fant {rad['rå_score']!r}")
+        grid_scorer = fersk_grid.get(navn, {}).get("scorer", {})
+        for fagfelt, krit, forventet, _ in skrivejobb:
+            faktisk = normalize_score(grid_scorer.get(krit))
+            if faktisk != forventet:
+                avvik.append(f"«{krit}» i den fargede fanen: skrev {forventet!r}, fant {grid_scorer.get(krit)!r}")
 
     try:
         kontroll_generelle = read_generelle_kommentarer(sh)
     except Exception as e:
-        st.session_state["_lagringstilstand"] = ("feil", f"Kunne ikke lese tilbake generell kommentar: {e}")
+        st.session_state["_lagringstilstand"] = ("feil", feilmelding_tekst("Kunne ikke lese tilbake generell kommentar", e))
         return False
     lagret_generell = next((g["kommentar"] for g in kontroll_generelle if g["butikk"] == navn and g["jurymedlem"] == jurynavn), "")
     if (lagret_generell or "") != (generell_tekst or ""):

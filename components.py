@@ -10,6 +10,34 @@ from data import er_tall
 from theme import FAGFELT_FARGE
 
 
+def feilmelding_tekst(melding: str, e: Exception) -> str:
+    """Som vis_feil(), men returnerer bare TEKSTEN – til bruk der feilen
+    vises via noe annet enn st.error() direkte (f.eks. lagringsstatus())."""
+    tekst = str(e)
+    if "429" in tekst and "quota" in tekst.lower():
+        return f"{melding} – Google Sheets er midlertidig overbelastet. Vent et halvt minutt og prøv igjen."
+    return f"{melding}: {e}"
+
+
+def vis_feil(melding: str, e: Exception):
+    """Viser en brukervennlig feilmelding. Gjenkjenner Google Sheets sin
+    429-kvotefeil spesifikt ("for mange forespørsler akkurat nå", ofte fordi
+    flere bruker appen samtidig – går normalt over av seg selv i løpet av
+    et minutt) og viser en forklarende norsk melding uten den kryptiske
+    APIError-teksten. Alt annet vises fortsatt med den opprinnelige
+    feilteksten synlig, siden den er nyttig for feilsøking."""
+    tekst = str(e)
+    if "429" in tekst and "quota" in tekst.lower():
+        st.error(
+            f"{melding} – Google Sheets er midlertidig overbelastet (for mange forespørsler akkurat nå, "
+            "trolig fordi flere bruker appen samtidig). Vent et halvt minutt og last siden på nytt – dette "
+            "går vanligvis over av seg selv.",
+            icon=":material/hourglass_top:",
+        )
+    else:
+        st.error(f"{melding}: {e}", icon=":material/error:")
+
+
 def topptekst(sidetittel: str):
     """Toppområde med merke/tittel til venstre, og tilkoblingsstatus + valgt
     jurymedlem til høyre (sidepanelet er fjernet, se app.py)."""

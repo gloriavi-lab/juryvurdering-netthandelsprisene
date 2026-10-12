@@ -472,8 +472,10 @@ def skriv_mange_til_farget_fane(sh, butikk, verdier_og_notater: list):
     det "Vurderinger"-loggen til enhver tid mener er riktig verdi (se
     data.offisiell_celleverdi). ÉTT batch_update-kall for selve scorene
     (value_input_option=USER_ENTERED, slik at tall faktisk blir TALL i
-    arket – ikke tekst), pluss ett insert_note/clear_note-kall per celle for
-    kommentaren (gspread har ingen batch-variant for notater).
+    arket – ikke tekst), pluss ETT update_notes-kall for ALLE kommentarene
+    samtidig (gspread batcher notater internt i ett eneste API-kall – se
+    Worksheet.update_notes – i stedet for ett insert_note/clear_note-kall
+    per celle, som før brukte opptil N ekstra API-kall per lagring).
 
     verdier_og_notater: liste av (fagfelt, kriterium, verdi, notat_tekst).
     verdi er et tall, IKKE_VURDERT-teksten, eller None (tømmer cellen).
@@ -486,26 +488,23 @@ def skriv_mange_til_farget_fane(sh, butikk, verdier_og_notater: list):
         raise ValueError(f"Fant ikke «{butikk}» i «{ws.title}» – kan ikke lagre.")
     rad_nr = butikker[butikk]["rad"]
 
-    oppdateringer, notater, celler = [], [], {}
+    oppdateringer, notater, celler = [], {}, {}
     for fagfelt, kriterium, verdi, notat in verdier_og_notater:
         kolonne = krit.get((fagfelt, kriterium))
         if not kolonne:
             raise ValueError(f"Fant ikke kolonnen for «{kriterium}» under «{fagfelt}» i «{ws.title}».")
         celle = gspread.utils.rowcol_to_a1(rad_nr, kolonne)
         oppdateringer.append({"range": celle, "values": [[verdi if verdi is not None else ""]]})
-        notater.append((celle, notat))
+        notater[celle] = notat or ""
         celler[kriterium] = celle
 
     if oppdateringer:
         ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
-    for celle, notat in notater:
-        try:
-            if notat:
-                ws.insert_note(celle, notat)
-            else:
-                ws.clear_note(celle)
-        except Exception:
-            pass  # notatet er kun en bekvemmelighet – skal aldri blokkere selve scoren
+    try:
+        if notater:
+            ws.update_notes(notater)
+    except Exception:
+        pass  # notatet er kun en bekvemmelighet – skal aldri blokkere selve scoren
     _rå_formatert.clear()  # read_ratings/_les_butikkliste leser via denne – MÅ tømmes, ikke bare read_ratings sin egen cache
     read_ratings.clear()
     return celler
@@ -857,6 +856,47 @@ def upsert_vurdering(sh, butikk, jurymedlem, fagfelt, kriterium, score, kommenta
         else:
             ws.append_row(verdier)
     elif rad_nr:
+        ws.spreadsheet.batch_update({"requests": [{
+            "deleteDimension": {"range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": rad_nr - 1, "endIndex": rad_nr}}
+        }]})
+    read_vurderinger.clear()
+
+
+def upsert_mange_vurderinger(sh, butikk, jurymedlem, kriterier: list):
+    """BATCHED variant av upsert_vurdering – skriver ALLE kriteriene for én
+    "Lagre og neste"-handling i maks to API-kall (ett batch_update for
+    eksisterende rader, ett append_rows for nye), i stedet for ett
+    get_all_values()-kall OG ett skrive-kall PER KRITERIUM. Lagt til etter
+    at appen traff Google sin kvote for leseforespørsler i produksjon – en
+    lagring med 5 kriterier gjorde før 10 separate API-kall her alene.
+    Oppfører seg funksjonelt IDENTISK med å kalle upsert_vurdering per
+    kriterium (samme rad-gjenfinning, samme tall-vs-tekst-regel) – kun
+    ANTALL API-kall er redusert, ingen endring i hva som faktisk lagres.
+
+    kriterier: liste av (fagfelt, kriterium, score, kommentar)."""
+    ws = _sikre_enkel_fane_med_header(sh, VURDERINGER_FANE, VURDERINGER_HEADER2)
+    rader = ws.get_all_values()
+    tidsstempel = naa_norsk().strftime("%Y-%m-%d %H:%M")
+
+    oppdateringer, nye_rader, slett_rad_nr = [], [], []
+    for fagfelt, kriterium, score, kommentar in kriterier:
+        rad_nr, _ = _finn_vurdering_rad(rader, butikk, jurymedlem, kriterium)
+        if score:
+            normalisert_score = normalize_score(score)
+            lagret_score = normalisert_score if normalisert_score is not None else score
+            verdier = [butikk, jurymedlem, fagfelt, kriterium, lagret_score, kommentar or "", tidsstempel]
+            if rad_nr:
+                oppdateringer.append({"range": f"A{rad_nr}:G{rad_nr}", "values": [verdier]})
+            else:
+                nye_rader.append(verdier)
+        elif rad_nr:
+            slett_rad_nr.append(rad_nr)
+
+    if oppdateringer:
+        ws.batch_update(oppdateringer)
+    if nye_rader:
+        ws.append_rows(nye_rader)
+    for rad_nr in sorted(slett_rad_nr, reverse=True):  # bakfra, ellers forskyves radnumrene under sletting
         ws.spreadsheet.batch_update({"requests": [{
             "deleteDimension": {"range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": rad_nr - 1, "endIndex": rad_nr}}
         }]})

@@ -7,7 +7,7 @@ import io
 
 import streamlit as st
 
-from components import klasse_badge, topptekst
+from components import klasse_badge, topptekst, vis_feil
 from data import KLASSER, er_tall, normalize_score, snitt_av_scorer, status_for_scorer
 from jury import aktive_kriterier, aktiv_fase, fagfelt_liste, kriterier_per_fagfelt, read_criteria, read_faser
 from sheets import er_finale_last, finale_las_info, hent_finale_snapshot, las_finale, read_ratings, read_stores
@@ -44,7 +44,7 @@ try:
     butikker, _ = read_stores(sh)
     rating_data = read_ratings(sh)
 except Exception as e:
-    st.error(f"Kunne ikke lese regnearket: {e}", icon=":material/error:")
+    vis_feil("Kunne ikke lese regnearket", e)
     st.stop()
 
 if not butikker:
