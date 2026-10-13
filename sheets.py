@@ -1081,11 +1081,23 @@ def migrer_vurderinger_til_farget_fane(sh):
     }
 
 
-def fane_oversikt(sh):
+@st.cache_data(ttl=30, show_spinner=False)
+def fane_oversikt(_sh):
     """Lister ALLE faner i regnearket med en kort forklaring på hva appen
     bruker den til (eller ikke) – til Innstillinger, slik at det alltid er
     synlig nøyaktig hvilken fane som er aktiv kontra en gammel levning.
-    Rører ingenting, kun lesing."""
+    Rører ingenting, kun lesing.
+
+    Mellomlagret (var UCACHET) – denne gjør et eget metadata-kall
+    (sh.worksheets()) som gjentas på HVER rerun av Innstillinger, og
+    Innstillinger har mange knapper som hver trigger en full rerun. Lagt til
+    etter at flere admin-handlinger rett etter hverandre (f.eks. å godkjenne
+    3 veiledningstekster på rad) traff Google sin lesekvote. Handlinger som
+    faktisk ENDRER fane-lista (arkivering, ombytting, orphan-migrering,
+    oppretting av Fase 2) tømmer denne cachen eksplisitt etterpå, så admin
+    ser oppdatert status med én gang – se kall til fane_oversikt.clear() i
+    pages/innstillinger.py."""
+    sh = _sh
     kjente = {
         FASE2_FANE: ("AKTIV", f"Appen leser og skriver hit – score som tall, kommentar som celle-notat."),
         FASE1_FANE: ("I bruk", "Kilde til butikklisten (Butikk/Klasse/Bransje/URL) – aldri skrevet til."),

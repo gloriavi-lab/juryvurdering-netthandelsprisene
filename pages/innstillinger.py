@@ -5,7 +5,7 @@ ingen egen struktur)."""
 
 import streamlit as st
 
-from components import status_prikk, topptekst
+from components import status_prikk, topptekst, vis_feil
 from jury import (
     add_criterion, aktive_kriterier, aktiv_fase, deaktiver_kriterium, fagfelt_liste, kriterier_per_fagfelt,
     manglende_foreslatte_kriterier, manglende_veiledning_oppdateringer, mine_kriterier, oppdater_kriterium,
@@ -77,7 +77,7 @@ else:
 try:
     butikker, advarsler = read_stores(sh)
 except Exception as e:
-    st.error(f"Fant ikke fanen «{FASE1_FANE}» i regnearket (eller noe annet gikk galt): {e}", icon=":material/error:")
+    vis_feil(f"Fant ikke fanen «{FASE1_FANE}» i regnearket (eller noe annet gikk galt)", e)
     st.stop()
 
 st.caption(f"Leser butikklisten direkte fra fanen «{FASE1_FANE}» – {len(butikker)} butikker funnet.")
@@ -115,9 +115,13 @@ st.caption(
 
 bkc1, bkc2 = st.columns(2)
 if bkc1.button("Ta sikkerhetskopi av alle faner nå", icon=":material/backup:", use_container_width=True):
-    with st.spinner("Sikkerhetskopierer …"):
-        nye_navn = sikkerhetskopier_alle_faner(sh)
-    st.success(f"{len(nye_navn)} faner sikkerhetskopiert: {', '.join(nye_navn)}", icon=":material/check_circle:")
+    try:
+        with st.spinner("Sikkerhetskopierer …"):
+            nye_navn = sikkerhetskopier_alle_faner(sh)
+    except Exception as e:
+        vis_feil("Kunne ikke ta sikkerhetskopi", e)
+    else:
+        st.success(f"{len(nye_navn)} faner sikkerhetskopiert: {', '.join(nye_navn)}", icon=":material/check_circle:")
 
 if bkc2.button(f"Flytt «{VURDERINGER_FANE}»-logg inn i «{FASE2_FANE}»", icon=":material/database:", use_container_width=True, type="primary"):
     st.session_state["_vis_migrer_til_farget_dialog"] = True
@@ -135,10 +139,14 @@ def migrer_til_farget_dialog():
     if c1.button("Avbryt", use_container_width=True, key="avbryt_migrer_farget"):
         st.rerun()
     if c2.button("Ja, flytt nå", type="primary", use_container_width=True, icon=":material/database:", key="bekreft_migrer_farget"):
-        with st.spinner("Sikkerhetskopierer og flytter data …"):
-            resultat = migrer_vurderinger_til_farget_fane(sh)
-        st.session_state["_migrering_til_farget_resultat"] = resultat
-        st.rerun()
+        try:
+            with st.spinner("Sikkerhetskopierer og flytter data …"):
+                resultat = migrer_vurderinger_til_farget_fane(sh)
+        except Exception as e:
+            vis_feil("Kunne ikke flytte data", e)
+        else:
+            st.session_state["_migrering_til_farget_resultat"] = resultat
+            st.rerun()
 
 
 if st.session_state.get("_vis_migrer_til_farget_dialog"):
@@ -180,10 +188,14 @@ def migrer_dialog():
     if c1.button("Avbryt", use_container_width=True):
         st.rerun()
     if c2.button("Ja, flytt data nå", type="primary", use_container_width=True, icon=":material/database:"):
-        with st.spinner("Sikkerhetskopierer og flytter data …"):
-            resultat = migrer_til_vurderinger_fane(sh)
-        st.session_state["_migrering_resultat"] = resultat
-        st.rerun()
+        try:
+            with st.spinner("Sikkerhetskopierer og flytter data …"):
+                resultat = migrer_til_vurderinger_fane(sh)
+        except Exception as e:
+            vis_feil("Kunne ikke flytte data", e)
+        else:
+            st.session_state["_migrering_resultat"] = resultat
+            st.rerun()
 
 
 if st.session_state.get("_vis_migrer_dialog"):
@@ -212,10 +224,14 @@ def konverter_dialog():
     if c1.button("Avbryt", use_container_width=True, key="avbryt_konverter"):
         st.rerun()
     if c2.button("Ja, konverter nå", type="primary", use_container_width=True, icon=":material/pin:", key="bekreft_konverter"):
-        with st.spinner("Sikkerhetskopierer og konverterer …"):
-            resultat = konverter_scorer_til_tall(sh)
-        st.session_state["_konverter_resultat"] = resultat
-        st.rerun()
+        try:
+            with st.spinner("Sikkerhetskopierer og konverterer …"):
+                resultat = konverter_scorer_til_tall(sh)
+        except Exception as e:
+            vis_feil("Kunne ikke konvertere scorer", e)
+        else:
+            st.session_state["_konverter_resultat"] = resultat
+            st.rerun()
 
 
 if st.session_state.get("_vis_konverter_dialog"):
@@ -253,10 +269,14 @@ def kommentar_formel_dialog():
     if c1.button("Avbryt", use_container_width=True, key="avbryt_kommentar_formel"):
         st.rerun()
     if c2.button("Ja, sett opp nå", type="primary", use_container_width=True, icon=":material/table_view:", key="bekreft_kommentar_formel"):
-        with st.spinner("Sikkerhetskopierer og setter opp formelvisning …"):
-            backup_navn = sett_opp_kommentarer_som_formelvisning(sh)
-        st.session_state["_kommentar_formel_resultat"] = backup_navn
-        st.rerun()
+        try:
+            with st.spinner("Sikkerhetskopierer og setter opp formelvisning …"):
+                backup_navn = sett_opp_kommentarer_som_formelvisning(sh)
+        except Exception as e:
+            vis_feil("Kunne ikke sette opp formelvisning", e)
+        else:
+            st.session_state["_kommentar_formel_resultat"] = backup_navn
+            st.rerun()
 
 
 if st.session_state.get("_vis_kommentar_formel_dialog"):
@@ -275,7 +295,7 @@ try:
     faner = fane_oversikt(sh)
 except Exception as e:
     faner = []
-    st.error(f"Kunne ikke liste faner: {e}", icon=":material/error:")
+    vis_feil("Kunne ikke liste faner", e)
 
 if faner:
     st.dataframe(
@@ -285,10 +305,11 @@ if faner:
     if st.button(f"Flytt «{FASE2_FANE}» (aktiv) først", icon=":material/arrow_upward:"):
         try:
             flytt_fane_til_forst(sh, FASE2_FANE)
+            fane_oversikt.clear()
             st.toast("Flyttet.", icon=":material/check_circle:")
             st.rerun()
         except Exception as e:
-            st.error(f"Kunne ikke flytte fanen: {e}", icon=":material/error:")
+            vis_feil("Kunne ikke flytte fanen", e)
 
     kandidater = [f["navn"] for f in faner if f["kan_arkiveres"]]
     if kandidater:
@@ -299,8 +320,9 @@ if faner:
                 try:
                     merket.append(merk_som_arkiv(sh, navn))
                 except Exception as e:
-                    st.error(f"Kunne ikke merke «{navn}»: {e}", icon=":material/error:")
+                    vis_feil(f"Kunne ikke merke «{navn}»", e)
             if merket:
+                fane_oversikt.clear()
                 st.success(f"Merket: {', '.join(merket)}", icon=":material/check_circle:")
                 st.rerun()
 
@@ -314,7 +336,7 @@ if faner:
             _orphan_sjekk = sjekk_gammel_fane_for_orphan_data(sh, _gammel_fane_navn)
         except Exception as e:
             _orphan_sjekk = None
-            st.error(f"Kunne ikke sjekke «{_gammel_fane_navn}»: {e}", icon=":material/error:")
+            vis_feil(f"Kunne ikke sjekke «{_gammel_fane_navn}»", e)
         if _orphan_sjekk:
             if _orphan_sjekk["orphans"]:
                 st.warning(
@@ -324,14 +346,18 @@ if faner:
                     icon=":material/warning:",
                 )
                 if st.button(f"Flytt disse {len(_orphan_sjekk['orphans'])} verdiene inn i «{FASE2_FANE}» og «{VURDERINGER_FANE}»", icon=":material/move_up:"):
-                    with st.spinner("Sikkerhetskopierer og flytter …"):
-                        res = migrer_orphan_fane(sh, _gammel_fane_navn)
-                    st.success(f"Flyttet {res['antall_migrert']} verdier for {res['antall_butikker']} butikker.", icon=":material/check_circle:")
-                    st.caption(f"Sikkerhetskopier: {', '.join(res['backup'])}")
-                    if res["feilet"]:
-                        with st.expander(f"{len(res['feilet'])} butikk(er) kunne ikke skrives til den fargede fanen"):
-                            for feil in res["feilet"]:
-                                st.markdown(f"- {feil}")
+                    try:
+                        with st.spinner("Sikkerhetskopierer og flytter …"):
+                            res = migrer_orphan_fane(sh, _gammel_fane_navn)
+                    except Exception as e:
+                        vis_feil("Kunne ikke flytte verdiene", e)
+                    else:
+                        st.success(f"Flyttet {res['antall_migrert']} verdier for {res['antall_butikker']} butikker.", icon=":material/check_circle:")
+                        st.caption(f"Sikkerhetskopier: {', '.join(res['backup'])}")
+                        if res["feilet"]:
+                            with st.expander(f"{len(res['feilet'])} butikk(er) kunne ikke skrives til den fargede fanen"):
+                                for feil in res["feilet"]:
+                                    st.markdown(f"- {feil}")
             else:
                 st.success(f"«{_gammel_fane_navn}» finnes, men inneholder ingen verdier som mangler i «{VURDERINGER_FANE}» – trygt å arkivere over (se listen over).", icon=":material/check_circle:")
 
@@ -346,16 +372,25 @@ with st.expander(f"Opprett «{FASE2_FANE}» manuelt", icon=":material/content_co
         st.success(f"«{FASE2_FANE}» finnes allerede.", icon=":material/check_circle:")
     except Exception:
         if st.button("Opprett «Rangering fase 2» nå", icon=":material/content_copy:"):
-            read_ratings(sh)  # trigger _sikre_fase2_fane
-            st.rerun()
+            try:
+                read_ratings(sh)  # trigger _sikre_fase2_fane
+            except Exception as e:
+                vis_feil(f"Kunne ikke opprette «{FASE2_FANE}»", e)
+            else:
+                fane_oversikt.clear()
+                st.rerun()
 
     st.caption(
         "Legger «Kan ikke vurdere» til som en ekstra gyldig verdi i kriteriecellenes nedtrekksliste på "
         f"«{FASE2_FANE}» (i tillegg til 1–5). Endrer kun datavalideringen, ingen annen formatering."
     )
     if st.button("Legg til nå", icon=":material/playlist_add_check:"):
-        legg_til_na_i_datavalidering(sh)
-        st.success("Lagt til.", icon=":material/check_circle:")
+        try:
+            legg_til_na_i_datavalidering(sh)
+        except Exception as e:
+            vis_feil("Kunne ikke legge til", e)
+        else:
+            st.success("Lagt til.", icon=":material/check_circle:")
 
 st.divider()
 st.subheader("Veiledningstekst («Hvordan bedømme»)", anchor=False)
@@ -363,7 +398,7 @@ try:
     manglende_veiledning = manglende_veiledning_oppdateringer(sh)
 except Exception as e:
     manglende_veiledning = {}
-    st.error(f"Kunne ikke lese veiledningen: {e}", icon=":material/error:")
+    vis_feil("Kunne ikke lese veiledningen", e)
 
 if not manglende_veiledning:
     st.success("Veiledningsteksten er oppdatert.", icon=":material/check_circle:")
@@ -376,9 +411,13 @@ else:
             st.caption("Foreslått:")
             st.markdown(ny)
             if st.button(f"Oppdater «{overskrift}»", key=f"oppdater_veiledning_{overskrift}"):
-                oppdater_veiledning_rad(sh, overskrift, ny)
-                st.toast("Oppdatert", icon=":material/check_circle:")
-                st.rerun()
+                try:
+                    oppdater_veiledning_rad(sh, overskrift, ny)
+                except Exception as e:
+                    vis_feil(f"Kunne ikke oppdatere «{overskrift}»", e)
+                else:
+                    st.toast("Oppdatert", icon=":material/check_circle:")
+                    st.rerun()
 
 st.divider()
 st.subheader("Jury og kriterier", anchor=False)
@@ -444,9 +483,7 @@ if feilsok_jurymedlem and feilsok_butikk:
 
 
 def _sheets_feilboks(e, handling="lagre"):
-    st.error(f"Kunne ikke {handling} til regnearket – prøv igjen.", icon=":material/error:")
-    with st.expander("Detaljer (for feilsøking)"):
-        st.code(str(e))
+    vis_feil(f"Kunne ikke {handling} til regnearket", e)
 
 
 def _reset_dialog_avkrysninger(dialog_id):
@@ -674,9 +711,13 @@ if faser:
     valgt_fase_tekst = fc1.selectbox("Gjeldende fase", navn_liste_faser, index=standard_indeks)
     if fc2.button("Sett som gjeldende", use_container_width=True):
         valgt_nummer = int(valgt_fase_tekst.split(".")[0])
-        sett_gjeldende_fase(sh, valgt_nummer)
-        st.toast("Fasestatus oppdatert.", icon=":material/check_circle:")
-        st.rerun()
+        try:
+            sett_gjeldende_fase(sh, valgt_nummer)
+        except Exception as e:
+            vis_feil("Kunne ikke oppdatere fasestatus", e)
+        else:
+            st.toast("Fasestatus oppdatert.", icon=":material/check_circle:")
+            st.rerun()
     st.caption("Tidligere faser settes automatisk til «Fullført», senere til «Kommende». Kan overstyres manuelt i fanen «Faser» i regnearket etterpå.")
 else:
     st.caption("Fanen «Faser» finnes ikke ennå – opprettes automatisk neste gang Oversikt-siden åpnes.")
@@ -687,7 +728,11 @@ if er_finale_last(sh):
     av, tid = finale_las_info(sh)
     st.info(f"Finalelista er låst av **{av}** ({tid}). Endringer i Sheets påvirker ikke lenger rangeringen.", icon=":material/lock:")
     if st.button("Lås opp finalelista", icon=":material/lock_open:"):
-        fjern_finale_las(sh)
-        st.rerun()
+        try:
+            fjern_finale_las(sh)
+        except Exception as e:
+            vis_feil("Kunne ikke låse opp finalelista", e)
+        else:
+            st.rerun()
 else:
     st.caption("Finalelista er ikke låst – rangeringen på Finale-siden oppdateres live. Lås den fra Finale-siden når resultatet er klart.")
