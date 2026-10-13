@@ -330,11 +330,11 @@ def beskriv_tildeling(navn: str, jury: dict, kriterier_per_felt: dict) -> str:
 # Veiledning
 # ─────────────────────────────────────────────
 _VEILEDNING_SEED = [
-    ["Vurder som en vanlig kunde", "Besøk butikken slik en vanlig kunde ville gjort. Test på MOBIL er primært og et krav – PC er en ekstra bonus, ikke et krav. Det er et krav at nettbutikken er mobiltilpasset; dårlig mobiltilpasning skal trekke ned vurderingen. Du trenger ikke handle noe for å vurdere."],
+    ["Vurder som en vanlig kunde", "Besøk butikken slik en vanlig kunde ville gjort. Test på mobil er primært og et krav – PC er en ekstra bonus, ikke et krav. Det er et krav at nettbutikken er mobiltilpasset; dårlig mobiltilpasning skal trekke ned vurderingen. Du trenger ikke handle noe for å vurdere."],
     ["Skalaen 1–5", "1 = svak, under forventet nivå for en nettbutikk i denne klassen. 3 = middels, fungerer greit men har tydelig forbedringspotensial. 5 = utmerket, blant de beste i konkurransen på dette punktet. Se også skala-forklaringen under hvert enkelt kriterium."],
     ["«Kan ikke vurdere»", "Brukes når kriteriet rett og slett ikke lar seg bedømme for denne butikken (f.eks. en funksjon som ikke finnes eller ikke er relevant for bransjen) – ikke som en snarvei når du er usikker. Da bruker du heller midten av skalaen og skriver hvorfor i kommentarfeltet."],
-    ["Begrunnelse", "Kommentar er påkrevd ved karakter 1, 2 og 3 – lagringen stoppes uten den. Kommentarene brukes i tilbakemeldingen til finalistene, så gode kommentarer er ønsket også ved 4 og 5."],
-    ["Inhabilitet", "Har du en tilknytning til butikken (ansatt, eier, nær relasjon, oppdrag for dem e.l.), skal du ikke vurdere den – meld fra til oss (administrasjonen), uten å oppgi navn i kommentarfelt eller andre åpne felt."],
+    ["Begrunnelse", "Skriv kommentar på alt du vurderer, slik at vi kan bruke kommentarene i arbeidet mot finalen."],
+    ["Inhabilitet", "Har du en tilknytning til butikken (ansatt, eier, nær relasjon, oppdrag for dem e.l.), skal du ikke vurdere den – meld fra til oss."],
 ]
 
 

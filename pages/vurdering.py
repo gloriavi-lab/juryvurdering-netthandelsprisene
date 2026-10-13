@@ -434,8 +434,15 @@ def vis_vurderingsvisning():
             valg = st.segmented_control("Score", [1, 2, 3, 4, 5, "Kan ikke vurdere"], key=seg_key, label_visibility="collapsed")
 
             pakrevd = isinstance(valg, (int, float)) and valg <= 3
+            anbefalt = isinstance(valg, (int, float)) and valg >= 4
+            if pakrevd:
+                kommentar_label = " (påkrevd)"
+            elif anbefalt:
+                kommentar_label = " (anbefalt)"
+            else:
+                kommentar_label = " (valgfritt)"
             st.text_area(
-                "Kommentar" + (" (påkrevd)" if pakrevd else " (valgfritt)"), value=eksisterende.get("kommentar", ""),
+                "Kommentar" + kommentar_label, value=eksisterende.get("kommentar", ""),
                 key=kom_key, placeholder=f"Kommentar til «{krit}»" + (" – påkrevd ved lav score" if pakrevd else "…"),
                 height=68,
             )
