@@ -422,10 +422,14 @@ else:
 st.divider()
 st.subheader("Jury og kriterier", anchor=False)
 
-alle_kriterier = read_criteria(sh)
+try:
+    alle_kriterier = read_criteria(sh)
+    jury = read_jury(sh)
+except Exception as e:
+    alle_kriterier, jury = [], {}
+    vis_feil("Kunne ikke lese jury/kriterier", e)
 kriterier_fase3 = aktive_kriterier(alle_kriterier, fase="Fase 3")
 felt_dict = kriterier_per_fagfelt(kriterier_fase3)
-jury = read_jury(sh)
 navn_liste_jury = sorted(jury.keys())
 antall_jury_per_kriterium = {k: sum(1 for p in jury.values() if any(kr == k for kr in p["kriterier"])) for liste in felt_dict.values() for k in liste}
 
@@ -701,7 +705,11 @@ with fane_kriterier:
 
 st.divider()
 st.subheader("Fasestatus", anchor=False)
-faser = read_faser(sh)
+try:
+    faser = read_faser(sh)
+except Exception as e:
+    faser = []
+    vis_feil("Kunne ikke lese fasestatus", e)
 if faser:
     faser_sortert = sorted(faser, key=lambda f: int(f.get("Fase", 0)))
     gjeldende = aktiv_fase(faser)
@@ -724,7 +732,12 @@ else:
 
 st.divider()
 st.subheader("Finale", anchor=False)
-if er_finale_last(sh):
+try:
+    _finale_last = er_finale_last(sh)
+except Exception as e:
+    _finale_last = False
+    vis_feil("Kunne ikke lese finale-status", e)
+if _finale_last:
     av, tid = finale_las_info(sh)
     st.info(f"Finalelista er låst av **{av}** ({tid}). Endringer i Sheets påvirker ikke lenger rangeringen.", icon=":material/lock:")
     if st.button("Lås opp finalelista", icon=":material/lock_open:"):
