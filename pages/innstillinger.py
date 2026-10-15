@@ -560,15 +560,26 @@ def jury_dialog(redigerer_navn=None):
     if redigerer_navn:
         st.divider()
         if not st.session_state.get("_bekreft_slett_jury"):
+            # VIKTIG: et @st.dialog sin innmat er internt en FRAGMENT (bekreftet
+            # i streamlit sin egen kildekode – elements/dialog_decorator.py).
+            # Et VANLIG st.rerun() (scope="app", standard) bryter ut av fragmentet
+            # og LUKKER dermed dialogen – det er slik man ER MENT å lukke den (se
+            # "Ja, fjern" lenger ned, som bevisst bruker vanlig st.rerun() for å
+            # både lukke OG oppdatere jurylisten utenfor dialogen). Men for å
+            # bare gå videre til NESTE steg INNI samme dialog (vise bekreftelsen)
+            # må man bruke st.rerun(scope="fragment") – ellers forsvinner
+            # bekreftelsen stille (flagget ble satt, men ingenting tegnet det
+            # på nytt før dialogen uansett lukkes/åpnes igjen). Dette var den
+            # faktiske grunnen til at «Fjern jurymedlem» ikke syntes å gjøre noe.
             if st.button("Fjern jurymedlem", icon=":material/delete:", use_container_width=True):
                 st.session_state["_bekreft_slett_jury"] = True
-                st.rerun()
+                st.rerun(scope="fragment")
         else:
             st.warning(f"Fjerne **{redigerer_navn}**? Vurderinger personen allerede har gjort i regnearket beholdes.", icon=":material/warning:")
             w1, w2 = st.columns(2)
             if w1.button("Avbryt", key="avbryt_slett_jury", use_container_width=True):
                 st.session_state["_bekreft_slett_jury"] = False
-                st.rerun()
+                st.rerun(scope="fragment")
             if w2.button("Ja, fjern", type="primary", key="bekreft_slett_jury", use_container_width=True):
                 try:
                     slett_jurymedlem(sh, redigerer_navn)
