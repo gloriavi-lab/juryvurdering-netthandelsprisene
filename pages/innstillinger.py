@@ -16,9 +16,10 @@ from jury import (
 )
 from sheets import (
     FASE1_FANE, FASE2_FANE, GENERELLE_KOMMENTARER_FANE, er_finale_last, fane_oversikt, feilsok_farget_fane,
-    feilsok_vurdering, finale_las_info, fjern_finale_las, flytt_fane_til_forst, konverter_scorer_til_tall,
-    KOMMENTARER_FANE, legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, merk_som_arkiv, migrer_orphan_fane,
-    hent_api_kall_logg, migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane, nullstill_vurderinger,
+    feilsok_vurdering, finale_las_info, fjern_finale_las, fjern_formatering_fra_rad, flytt_fane_til_forst,
+    konverter_scorer_til_tall, KOMMENTARER_FANE, legg_til_kriterium_kolonne, legg_til_na_i_datavalidering,
+    merk_som_arkiv, migrer_orphan_fane, hent_api_kall_logg, migrer_til_vurderinger_fane,
+    migrer_vurderinger_til_farget_fane, nullstill_vurderinger,
     read_fase1_scores, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger,
     sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner, sjekk_gammel_fane_for_orphan_data,
     test_tilkobling, VURDERINGER_FANE,
@@ -485,6 +486,44 @@ with st.expander(f"Forhåndsvisning: rad 49 og nedover i «{FASE2_FANE}» (kun l
                     st.caption(f"… og {len(_ikke_tomme) - 50} rad(er) til (vis færre kolonner/rader om du vil se resten).")
             else:
                 st.success("Alle radene fra 49 og nedover er helt tomme.", icon=":material/check_circle:")
+
+    st.divider()
+    st.caption(
+        "Fjerner bakgrunnsfarger, skrift og kantlinjer fra rad 49 og utover (til fanens siste rad/kolonne) – "
+        "rører ALDRI celleverdier eller notater. Nyttig for gamle, uryddede levninger lenger ned i fanen."
+    )
+    if st.button(f"Fjern formatering og farger fra rad 49+ i «{FASE2_FANE}»", icon=":material/format_color_reset:"):
+        st.session_state["_vis_fjern_formatering_dialog"] = True
+
+
+@st.dialog("Fjerne formatering fra rad 49 og utover?")
+def fjern_formatering_dialog():
+    st.write(
+        f"Dette fjerner bakgrunnsfarger, skrift og kantlinjer fra rad 49 og utover i «{FASE2_FANE}» – "
+        "celleverdier og notater røres ikke. Sikkerhetskopi tas først."
+    )
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True, key="avbryt_fjern_format"):
+        st.rerun()
+    if c2.button("Ja, fjern formatering", type="primary", use_container_width=True, icon=":material/format_color_reset:", key="bekreft_fjern_format"):
+        try:
+            with st.spinner("Sikkerhetskopierer og fjerner formatering …"):
+                resultat = fjern_formatering_fra_rad(sh, FASE2_FANE, 49)
+        except Exception as e:
+            vis_feil("Kunne ikke fjerne formatering", e)
+        else:
+            st.session_state["_fjern_formatering_resultat"] = resultat
+            st.rerun()
+
+
+if st.session_state.get("_vis_fjern_formatering_dialog"):
+    st.session_state["_vis_fjern_formatering_dialog"] = False
+    fjern_formatering_dialog()
+
+if st.session_state.get("_fjern_formatering_resultat"):
+    r = st.session_state.pop("_fjern_formatering_resultat")
+    st.success(f"Ferdig! Formatering fjernet fra rad {r['fra_rad']} og utover i «{r['fane']}».", icon=":material/check_circle:")
+    st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
 
 st.divider()
 with st.expander(f"Opprett «{FASE2_FANE}» manuelt", icon=":material/content_copy:"):

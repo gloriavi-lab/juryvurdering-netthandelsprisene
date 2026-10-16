@@ -1374,3 +1374,30 @@ def nullstill_vurderinger(sh):
     read_generelle_kommentarer.clear()
     read_kommentarer.clear()
     return resultat
+
+
+def fjern_formatering_fra_rad(sh, fane_navn, fra_rad):
+    """Fjerner ALL celleformatering (bakgrunnsfarge, skrift, kantlinjer osv.)
+    fra og med gitt rad og ut til fanens siste rad/kolonne – rører ALDRI
+    selve celleverdiene eller notater. Bruker en rå repeatCell-forespørsel
+    med fields="userEnteredFormat" – ws.format() kan KUN sette formatering
+    til noe spesifikt, ikke nullstille den (se gspread sin batch_format(),
+    som bygger fields ut fra nøklene i dict-en du gir den – en tom dict gir
+    en tom, ugyldig feltmaske). Tar sikkerhetskopi først.
+
+    startRowIndex er 0-indeksert i Sheets API (derfor fra_rad - 1); å
+    utelate endRowIndex/startColumnIndex/endColumnIndex betyr "til slutten
+    av fanen i den retningen", per API-konvensjon."""
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+    ws = sh.worksheet(fane_navn)
+    ws.spreadsheet.batch_update({
+        "requests": [{
+            "repeatCell": {
+                "range": {"sheetId": ws.id, "startRowIndex": fra_rad - 1},
+                "cell": {"userEnteredFormat": {}},
+                "fields": "userEnteredFormat",
+            }
+        }]
+    })
+    _rå_formatert.clear()
+    return {"backup": backup_navn, "fane": fane_navn, "fra_rad": fra_rad}
