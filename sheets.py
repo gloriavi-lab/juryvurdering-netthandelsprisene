@@ -1414,3 +1414,99 @@ def fjern_formatering_fra_rad(sh, fane_navn, fra_rad):
     })
     _rå_formatert.clear()
     return {"backup": backup_navn, "fane": fane_navn, "fra_rad": fra_rad}
+
+
+def ensrett_butikkrader(sh, fane_navn, mal_rad, fra_rad, til_rad):
+    """Gjør butikkradene (fra_rad–til_rad) visuelt like en MAL-rad (typisk
+    en butikkrad du vet ser riktig ut) – kopierer celleformatering (skrift,
+    størrelse, bakgrunnsfarge, kantlinjer, justering) OG radhøyde dit.
+    Rører ALDRI selve celleVERDIENE – kun formatering/dimensjoner. Bruker
+    gspread sin copy_range() med paste_type=PASTE_FORMAT (samme mekanisme
+    som å kopiere én rad og lime inn «kun formatering» over et større
+    område i Sheets sitt brukergrensesnitt). Tar sikkerhetskopi først.
+
+    Radhøyde kopieres som et eget steg (CopyPasteRequest dekker kun
+    celleformatering, ikke rad-/kolonnedimensjoner) – hvis mal-radens høyde
+    ikke er eksplisitt satt (dvs. den bruker fanens standardhøyde), hoppes
+    dette steget bare over, siden alt da allerede er likt."""
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+    ws = sh.worksheet(fane_navn)
+    ws.copy_range(f"{mal_rad}:{mal_rad}", f"{fra_rad}:{til_rad}", paste_type=gspread.utils.PasteType.format)
+
+    radhoyde_satt = False
+    try:
+        meta = sh.fetch_sheet_metadata(params={
+            "ranges": [f"'{fane_navn}'!A{mal_rad}"],
+            "fields": "sheets.data.rowMetadata",
+            "includeGridData": "true",
+        })
+        pixel_size = meta["sheets"][0]["data"][0]["rowMetadata"][0].get("pixelSize")
+    except Exception:
+        pixel_size = None
+    if pixel_size:
+        ws.spreadsheet.batch_update({"requests": [{
+            "updateDimensionProperties": {
+                "range": {"sheetId": ws.id, "dimension": "ROWS", "startIndex": fra_rad - 1, "endIndex": til_rad},
+                "properties": {"pixelSize": pixel_size},
+                "fields": "pixelSize",
+            }
+        }]})
+        radhoyde_satt = True
+
+    _rå_formatert.clear()
+    return {"backup": backup_navn, "fane": fane_navn, "mal_rad": mal_rad, "fra_rad": fra_rad, "til_rad": til_rad, "radhoyde_satt": radhoyde_satt}
+
+
+def ensrett_url_lenker(sh, fane_navn, fra_rad, til_rad):
+    """Skriver om URL-kolonnen til formelen =HYPERLINK("url";"Besøk →") for
+    alle rader i intervallet som faktisk har en URL (enten som ren tekst
+    eller en eksisterende HYPERLINK-formel) – endrer ALDRI selve
+    nettadressen, kun hvordan den vises. Rader uten URL hoppes over. Tar
+    sikkerhetskopi først."""
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+    ws = sh.worksheet(fane_navn)
+    grunn, _, _ = _header_data(ws)
+    kol_url = grunn.get("URL")
+    if not kol_url:
+        return {"backup": backup_navn, "antall": 0, "feil": "Fant ingen «URL»-kolonne."}
+
+    formler = ws.get_all_values(value_render_option="FORMULA")
+    oppdateringer = []
+    for r in range(fra_rad, til_rad + 1):
+        if r > len(formler):
+            continue
+        rad = formler[r - 1]
+        rå = rad[kol_url - 1] if len(rad) >= kol_url else ""
+        url = _uthent_url(rå)
+        if url:
+            celle = gspread.utils.rowcol_to_a1(r, kol_url)
+            oppdateringer.append({"range": celle, "values": [[f'=HYPERLINK("{url}";"Besøk →")']]})
+
+    if oppdateringer:
+        ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
+    _rå_formatert.clear()
+    _rå_formel.clear()
+    read_ratings.clear()
+    return {"backup": backup_navn, "antall": len(oppdateringer)}
+
+
+def finn_tomme_butikkrader(sh, fane_navn, fra_rad, til_rad):
+    """Kun lesing: lister rader i intervallet der Butikk-kolonnen er tom –
+    til bruk for å bekrefte at det ikke står igjen tomme rader blant
+    butikkradene."""
+    ws = sh.worksheet(fane_navn)
+    grunn, _, _ = _header_data(ws)
+    kol_butikk = grunn.get("Butikk")
+    if not kol_butikk:
+        return []
+    rader = ws.get_all_values()
+    tomme = []
+    for r in range(fra_rad, til_rad + 1):
+        if r > len(rader):
+            tomme.append(r)
+            continue
+        rad = rader[r - 1]
+        navn = rad[kol_butikk - 1].strip() if len(rad) >= kol_butikk else ""
+        if not navn:
+            tomme.append(r)
+    return tomme

@@ -15,11 +15,11 @@ from jury import (
     read_criteria, read_faser, read_jury, sett_gjeldende_fase, slett_jurymedlem, write_jury,
 )
 from sheets import (
-    FASE1_FANE, FASE2_FANE, GENERELLE_KOMMENTARER_FANE, er_finale_last, fane_oversikt, feilsok_farget_fane,
-    feilsok_vurdering, finale_las_info, fjern_finale_las, fjern_formatering_fra_rad, flytt_fane_til_forst,
-    konverter_scorer_til_tall, KOMMENTARER_FANE, legg_til_kriterium_kolonne, legg_til_na_i_datavalidering,
-    merk_som_arkiv, migrer_orphan_fane, hent_api_kall_logg, migrer_til_vurderinger_fane,
-    migrer_vurderinger_til_farget_fane, nullstill_vurderinger,
+    FASE1_FANE, FASE2_FANE, GENERELLE_KOMMENTARER_FANE, ensrett_butikkrader, ensrett_url_lenker, er_finale_last,
+    fane_oversikt, feilsok_farget_fane, feilsok_vurdering, finale_las_info, finn_tomme_butikkrader,
+    fjern_finale_las, fjern_formatering_fra_rad, flytt_fane_til_forst, konverter_scorer_til_tall, KOMMENTARER_FANE,
+    legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, merk_som_arkiv, migrer_orphan_fane,
+    hent_api_kall_logg, migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane, nullstill_vurderinger,
     read_fase1_scores, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger,
     sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner, sjekk_gammel_fane_for_orphan_data,
     test_tilkobling, VURDERINGER_FANE,
@@ -462,6 +462,94 @@ if faner:
                                     st.markdown(f"- {feil}")
             else:
                 st.success(f"«{_gammel_fane_navn}» finnes, men inneholder ingen verdier som mangler i «{VURDERINGER_FANE}» – trygt å arkivere over (se listen over).", icon=":material/check_circle:")
+
+st.divider()
+with st.expander(f"Ensrett butikkradene (rad 3–48) i «{FASE2_FANE}»", icon=":material/format_paint:"):
+    st.caption(
+        "Gjør butikkradene like resten av arket: skrift/størrelse/radhøyde/bakgrunnsfarger/kantlinjer kopieres "
+        "fra én mal-rad du velger – celleVERDIENE røres aldri. «Besøk →»-lenken skrives om separat. Nedtrekks-"
+        "listene (1–5 + «Kan ikke vurdere») settes for HELE arket av «Legg til nå»-knappen lenger ned under "
+        "«Opprett «{FASE2_FANE}» manuelt», og gjeldende fase settes under «Fasestatus» – begge er allerede "
+        "bygget, så de gjentas ikke her.".format(FASE2_FANE=FASE2_FANE)
+    )
+
+    if st.button("Sjekk om noen av rad 3–48 er tomme", icon=":material/search:"):
+        try:
+            _tomme = finn_tomme_butikkrader(sh, FASE2_FANE, 3, 48)
+        except Exception as e:
+            vis_feil("Kunne ikke sjekke rad 3–48", e)
+        else:
+            if _tomme:
+                st.warning(f"{len(_tomme)} tom(me) rad(er) blant butikkradene: {', '.join(str(r) for r in _tomme)}.", icon=":material/warning:")
+            else:
+                st.success("Ingen tomme rader blant rad 3–48.", icon=":material/check_circle:")
+
+    st.write("")
+    _mal_rad = st.number_input("Mal-rad (en butikkrad du vet ser riktig ut)", min_value=3, max_value=48, value=3, step=1, key="_mal_rad_ensrett")
+    if st.button(f"Kopier formatering + radhøyde fra rad {_mal_rad} til rad 3–48", icon=":material/format_paint:"):
+        st.session_state["_vis_ensrett_dialog"] = True
+
+    st.write("")
+    if st.button(f"Sett «Besøk →»-lenker i URL-kolonnen for rad 3–48", icon=":material/link:"):
+        st.session_state["_vis_url_lenker_dialog"] = True
+
+
+@st.dialog("Ensrette butikkradene?")
+def ensrett_dialog(mal_rad):
+    st.write(f"Kopierer formatering og radhøyde fra rad {mal_rad} til alle rader fra 3 til 48 i «{FASE2_FANE}». Celleverdier røres ikke. Sikkerhetskopi tas først.")
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True, key="avbryt_ensrett"):
+        st.rerun()
+    if c2.button("Ja, ensrett nå", type="primary", use_container_width=True, icon=":material/format_paint:", key="bekreft_ensrett"):
+        try:
+            with st.spinner("Sikkerhetskopierer og kopierer formatering …"):
+                resultat = ensrett_butikkrader(sh, FASE2_FANE, mal_rad, 3, 48)
+        except Exception as e:
+            vis_feil("Kunne ikke ensrette butikkradene", e)
+        else:
+            st.session_state["_ensrett_resultat"] = resultat
+            st.rerun()
+
+
+if st.session_state.get("_vis_ensrett_dialog"):
+    st.session_state["_vis_ensrett_dialog"] = False
+    ensrett_dialog(_mal_rad)
+
+if st.session_state.get("_ensrett_resultat"):
+    r = st.session_state.pop("_ensrett_resultat")
+    st.success(f"Ferdig! Formatering kopiert fra rad {r['mal_rad']} til rad {r['fra_rad']}–{r['til_rad']}.", icon=":material/check_circle:")
+    st.caption(f"Radhøyde {'ble også satt likt' if r['radhoyde_satt'] else 'ble IKKE endret (mal-raden bruker standardhøyde, så ingenting å kopiere)'}.")
+    st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
+
+
+@st.dialog("Sette «Besøk →»-lenker?")
+def url_lenker_dialog():
+    st.write(f"Skriver om URL-kolonnen til =HYPERLINK(\"url\";\"Besøk →\") for alle rader fra 3 til 48 i «{FASE2_FANE}» som faktisk har en URL. Selve nettadressen endres ikke, kun visningen. Sikkerhetskopi tas først.")
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True, key="avbryt_url_lenker"):
+        st.rerun()
+    if c2.button("Ja, sett lenker nå", type="primary", use_container_width=True, icon=":material/link:", key="bekreft_url_lenker"):
+        try:
+            with st.spinner("Sikkerhetskopierer og setter lenker …"):
+                resultat = ensrett_url_lenker(sh, FASE2_FANE, 3, 48)
+        except Exception as e:
+            vis_feil("Kunne ikke sette lenker", e)
+        else:
+            st.session_state["_url_lenker_resultat"] = resultat
+            st.rerun()
+
+
+if st.session_state.get("_vis_url_lenker_dialog"):
+    st.session_state["_vis_url_lenker_dialog"] = False
+    url_lenker_dialog()
+
+if st.session_state.get("_url_lenker_resultat"):
+    r = st.session_state.pop("_url_lenker_resultat")
+    if r.get("feil"):
+        st.error(r["feil"], icon=":material/error:")
+    else:
+        st.success(f"Ferdig! {r['antall']} lenke(r) satt til «Besøk →».", icon=":material/check_circle:")
+    st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
 
 st.divider()
 with st.expander(f"Forhåndsvisning: rad 49 og nedover i «{FASE2_FANE}» (kun lesing)", icon=":material/preview:"):
