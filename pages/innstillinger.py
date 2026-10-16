@@ -131,13 +131,13 @@ else:
 try:
     butikker, advarsler = read_stores(sh)
 except Exception as e:
-    vis_feil(f"Fant ikke fanen «{FASE1_FANE}» i regnearket (eller noe annet gikk galt)", e)
+    vis_feil(f"Fant ikke fanen «{FASE2_FANE}» i regnearket (eller noe annet gikk galt)", e)
     st.stop()
 
-st.caption(f"Leser butikklisten direkte fra fanen «{FASE1_FANE}» – {len(butikker)} butikker funnet.")
+st.caption(f"Leser butikklisten direkte fra fanen «{FASE2_FANE}» – {len(butikker)} butikker funnet.")
 with st.expander("Fase-styrt butikkliste (valgfritt)", icon=":material/filter_alt:"):
     st.caption(
-        f"Legg til en kolonne kalt nøyaktig «Fase» i «{FASE1_FANE}» og skriv «Fase 2», «Fase 3» eller «Testkjøp» "
+        f"Legg til en kolonne kalt nøyaktig «Fase» i «{FASE2_FANE}» og skriv «Fase 2», «Fase 3» eller «Testkjøp» "
         "i den for en butikk, så vises den KUN for jury når akkurat den fasen er «Pågår» under Fasestatus lenger "
         "ned. Tom celle (standard) betyr at butikken vises uansett fase – ingenting filtreres bort før dere "
         "faktisk fyller ut kolonnen for noen butikker."

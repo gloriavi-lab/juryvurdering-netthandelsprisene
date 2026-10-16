@@ -11,7 +11,10 @@ git-loggen for sheets.py hvis du lurer på hvorfor dette har endret seg):
   "Kan ikke vurdere"), og kommentaren ligger som et celle-NOTAT på samme
   celle. Appen skriver hit ved hver lagring (skriv_mange_til_farget_fane) og
   LESER også herfra for alt den viser (read_ratings) – manuelle rettelser
-  direkte i arket vises derfor i appen ved neste lasting.
+  direkte i arket vises derfor i appen ved neste lasting. Den er OGSÅ (etter
+  eksplisitt avtale) den autoritative BUTIKKLISTEN nå (read_stores) – ALLE
+  sider (Vurdering/Butikker/Oversikt/Finale/Innstillinger) viser kun de
+  butikkene som faktisk står her, ikke hele Fase 1-lista.
 - "Vurderinger" (VURDERINGER_FANE) er en LOGG, ikke det appen viser: én rad
   per butikk + jurymedlem + kriterium, oppdatert ved hver lagring (se
   upsert_vurdering/read_vurderinger). Finnes for historikk/sporbarhet og for
@@ -21,10 +24,12 @@ git-loggen for sheets.py hvis du lurer på hvorfor dette har endret seg):
   kommentarer (flere jurymedlemmer kan ha hver sin) – egen, liten logg, ikke
   del av den fargede fanen (den har ingen naturlig énkelt-celle for en
   kommentar som ikke hører til ett bestemt kriterium).
-- FASE1_FANE ("Rangering juryvurdering") leses KUN for butikklistens
-  grunndata (Butikk/Klasse/Bransje/URL via read_stores) – aldri skrevet til.
-  Fortsatt i aktiv bruk, IKKE en arkiv-fane, selv om navnet kan forveksles
-  med FASE2_FANE.
+- FASE1_FANE ("Rangering juryvurdering") leses KUN for Fase 1-SCORER som
+  referanse (read_fase1_scores, f.eks. Fase1-snitt på Butikker-siden) –
+  aldri skrevet til, og IKKE lenger kilden til butikklisten (se FASE2_FANE
+  over – byttet fordi Fase 1-fanen kan inneholde flere butikker enn de som
+  faktisk skal ekspertvurderes). Fortsatt i aktiv bruk, IKKE en arkiv-fane,
+  selv om navnet kan forveksles med FASE2_FANE.
 - Alle andre faner som måtte hete noe i stil med "Rangering ..." og som
   IKKE er en av de fire over, er historiske levninger appen ikke rører –
   merkes "ARKIV – " i Innstillinger (aldri slettet automatisk).
@@ -408,9 +413,17 @@ def _les_butikkliste(ws, grunn):
 
 @st.cache_data(ttl=600, show_spinner=False)
 def read_stores(_sh):
-    """Returnerer (butikker, advarsler) fra Fase 1-fanen (butikklisten endrer
-    seg ikke mellom fasene – kun vurderingene gjør)."""
-    ws = _fane(_sh, FASE1_FANE)
+    """Returnerer (butikker, advarsler) fra FASE2_FANE («Rangering
+    ekspertvurdering») – BYTTET (etter eksplisitt avtale) fra Fase 1-fanen,
+    siden Fase 1-fanen kan inneholde FLERE butikker enn de som faktisk skal
+    ekspertvurderes (f.eks. 111 der mot 48 ryddede rader her). «Rangering
+    ekspertvurdering» er nå den autoritative butikklisten for Vurdering/
+    Butikker/Oversikt/Finale/Innstillinger – ALLE leser via denne ene
+    funksjonen, se grep av read_stores()-kallene.
+
+    read_fase1_scores() leser FORTSATT direkte fra Fase 1-fanen – det er en
+    egen, separat ting (Fase 1-SCORER som referanse), ikke butikklisten."""
+    ws = _sikre_fase2_fane(_sh)
     grunn, _, _ = _header_data(ws)
     return _les_butikkliste(ws, grunn)
 
