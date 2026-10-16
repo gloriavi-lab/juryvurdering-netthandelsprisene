@@ -13,12 +13,12 @@ from jury import (
     read_criteria, read_faser, read_jury, sett_gjeldende_fase, slett_jurymedlem, write_jury,
 )
 from sheets import (
-    FASE1_FANE, FASE2_FANE, er_finale_last, fane_oversikt, feilsok_farget_fane, feilsok_vurdering, finale_las_info,
-    fjern_finale_las, flytt_fane_til_forst, konverter_scorer_til_tall, KOMMENTARER_FANE, legg_til_kriterium_kolonne,
-    legg_til_na_i_datavalidering, merk_som_arkiv, migrer_orphan_fane, migrer_til_vurderinger_fane,
-    migrer_vurderinger_til_farget_fane, read_fase1_scores, read_ratings, read_stores, read_vurderinger,
-    sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner, sjekk_gammel_fane_for_orphan_data,
-    test_tilkobling, VURDERINGER_FANE,
+    FASE1_FANE, FASE2_FANE, GENERELLE_KOMMENTARER_FANE, er_finale_last, fane_oversikt, feilsok_farget_fane,
+    feilsok_vurdering, finale_las_info, fjern_finale_las, flytt_fane_til_forst, konverter_scorer_til_tall,
+    KOMMENTARER_FANE, legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, merk_som_arkiv, migrer_orphan_fane,
+    migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane, nullstill_vurderinger, read_fase1_scores,
+    read_ratings, read_stores, read_vurderinger, sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner,
+    sjekk_gammel_fane_for_orphan_data, test_tilkobling, VURDERINGER_FANE,
 )
 from theme import FAGFELT_FARGE
 
@@ -246,6 +246,54 @@ if st.session_state.get("_konverter_resultat"):
     st.caption("Sjekk at eventuelle snitt-/formelkolonner i regnearket regner riktig etter konverteringen.")
 
 st.divider()
+with st.expander("⚠ Nullstill alle vurderinger (start ekspertvurderingen helt tom)", icon=":material/delete_sweep:"):
+    st.warning(
+        f"Dette tømmer ALLE kriteriecellene og celle-notatene i «{FASE2_FANE}», og fjerner ALLE datarader i "
+        f"«{VURDERINGER_FANE}» og «{GENERELLE_KOMMENTARER_FANE}». «Kommentarer» trenger ingen egen handling – "
+        "den viser seg selv tom automatisk (den er en live formelvisning av «Vurderinger»).",
+        icon=":material/warning:",
+    )
+    st.caption("Rører ALDRI jury, kriterier, fordeling, veiledning eller faser. Tar sikkerhetskopi av alt FØRST.")
+    if st.button("Nullstill nå", icon=":material/delete_sweep:"):
+        st.session_state["_vis_nullstill_dialog"] = True
+
+
+@st.dialog("Nullstille alle vurderinger?")
+def nullstill_dialog():
+    st.warning(
+        f"Dette kan IKKE angres i selve fanene (men alt sikkerhetskopieres først). "
+        f"Alle scorer, kommentarer og celle-notater i «{FASE2_FANE}» forsvinner, og alle rader i "
+        f"«{VURDERINGER_FANE}» og «{GENERELLE_KOMMENTARER_FANE}» slettes.",
+        icon=":material/warning:",
+    )
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True, key="avbryt_nullstill"):
+        st.rerun()
+    if c2.button("Ja, nullstill alt nå", type="primary", use_container_width=True, icon=":material/delete_sweep:", key="bekreft_nullstill"):
+        try:
+            with st.spinner("Sikkerhetskopierer og nullstiller …"):
+                resultat = nullstill_vurderinger(sh)
+        except Exception as e:
+            vis_feil("Kunne ikke nullstille vurderinger", e)
+        else:
+            st.session_state["_nullstill_resultat"] = resultat
+            st.rerun()
+
+
+if st.session_state.get("_vis_nullstill_dialog"):
+    st.session_state["_vis_nullstill_dialog"] = False
+    nullstill_dialog()
+
+if st.session_state.get("_nullstill_resultat"):
+    r = st.session_state.pop("_nullstill_resultat")
+    st.success(
+        f"Ferdig! {r['fase2_celler']} celler og {r['fase2_notater']} notater tømt i «{FASE2_FANE}», "
+        f"{r['vurderinger_rader']} rader fjernet i «{VURDERINGER_FANE}», {r['generelle_rader']} rader fjernet i «{GENERELLE_KOMMENTARER_FANE}».",
+        icon=":material/check_circle:",
+    )
+    st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
+
+st.divider()
 st.subheader("Kommentar-oversikt", anchor=False)
 st.caption(
     f"«{KOMMENTARER_FANE}» slutter å bli skrevet til av appen når kommentarer flyttet inn i «{VURDERINGER_FANE}» "
@@ -361,6 +409,30 @@ if faner:
                                     st.markdown(f"- {feil}")
             else:
                 st.success(f"«{_gammel_fane_navn}» finnes, men inneholder ingen verdier som mangler i «{VURDERINGER_FANE}» – trygt å arkivere over (se listen over).", icon=":material/check_circle:")
+
+st.divider()
+with st.expander(f"Forhåndsvisning: rad 49 og nedover i «{FASE2_FANE}» (kun lesing)", icon=":material/preview:"):
+    st.caption(
+        "Viser nøyaktig det som faktisk står i radene – rører ingenting. Brukes til å avgjøre hva som skal "
+        "gjøres med disse radene før noe eventuelt flyttes eller slettes."
+    )
+    if st.button("Vis rad 49+", icon=":material/preview:"):
+        try:
+            _rader_49 = sh.worksheet(FASE2_FANE).get_all_values()[48:]
+        except Exception as e:
+            vis_feil(f"Kunne ikke lese «{FASE2_FANE}»", e)
+        else:
+            _ikke_tomme = [(i + 49, rad) for i, rad in enumerate(_rader_49) if any(c.strip() for c in rad)]
+            st.markdown(f"**{len(_rader_49)} rad(er) totalt fra rad 49, {len(_ikke_tomme)} av dem har noe innhold.**")
+            if _ikke_tomme:
+                st.dataframe(
+                    [{"Rad": radnr, **{f"Kolonne {j + 1}": v for j, v in enumerate(rad) if v.strip()}} for radnr, rad in _ikke_tomme[:50]],
+                    hide_index=True, use_container_width=True,
+                )
+                if len(_ikke_tomme) > 50:
+                    st.caption(f"… og {len(_ikke_tomme) - 50} rad(er) til (vis færre kolonner/rader om du vil se resten).")
+            else:
+                st.success("Alle radene fra 49 og nedover er helt tomme.", icon=":material/check_circle:")
 
 st.divider()
 with st.expander(f"Opprett «{FASE2_FANE}» manuelt", icon=":material/content_copy:"):

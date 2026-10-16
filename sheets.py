@@ -1266,3 +1266,72 @@ def konverter_scorer_til_tall(sh):
     read_vurderinger.clear()
 
     return {"backup": backup_navn, "antall_farget_fane": len(oppdateringer), "antall_vurderinger": len(oppdateringer2)}
+
+
+def nullstill_vurderinger(sh):
+    """Nullstiller ALT fra en vurderingsrunde, til bruk rett før en ny fase
+    starter helt fra bunnen: tømmer kriteriecellene OG celle-notatene for
+    alle butikkrader i FASE2_FANE, og fjerner alle datarader (header
+    beholdes) i VURDERINGER_FANE og GENERELLE_KOMMENTARER_FANE. Rører
+    ALDRI jury, kriterier, fordeling, veiledning eller faser.
+
+    NB: «Kommentarer»-fanen er BEVISST ikke med her – den er en LIVE
+    QUERY-formelvisning av «Vurderinger» (se
+    sett_opp_kommentarer_som_formelvisning), ikke egne rader lenger. Den
+    viser seg selv tom automatisk når «Vurderinger» tømmes – å kjøre
+    ws.clear() på den ville tvert imot ha ØDELAGT selve formelen.
+
+    Tar sikkerhetskopi av alt først."""
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+    resultat = {
+        "backup": backup_navn, "fase2_celler": 0, "fase2_notater": 0,
+        "vurderinger_rader": 0, "generelle_rader": 0,
+    }
+
+    try:
+        ws = sh.worksheet(FASE2_FANE)
+    except gspread.WorksheetNotFound:
+        ws = None
+    if ws:
+        grunn, krit, _ = _header_data(ws)
+        kol_butikk = grunn.get("Butikk")
+        rader = ws.get_all_values()
+        oppdateringer, notat_celler = [], []
+        for r in range(FORSTE_DATARAD, len(rader) + 1):
+            rad = rader[r - 1]
+            navn = rad[kol_butikk - 1].strip() if kol_butikk and len(rad) >= kol_butikk else ""
+            if not navn:
+                continue
+            for (_, _), kol in krit.items():
+                celle = gspread.utils.rowcol_to_a1(r, kol)
+                if len(rad) >= kol and rad[kol - 1]:
+                    oppdateringer.append({"range": celle, "values": [[""]]})
+                    resultat["fase2_celler"] += 1
+                notat_celler.append(celle)
+        if oppdateringer:
+            ws.batch_update(oppdateringer)
+        if notat_celler:
+            try:
+                ws.update_notes({c: "" for c in notat_celler})
+                resultat["fase2_notater"] = len(notat_celler)
+            except Exception:
+                pass  # notater er en bekvemmelighet – skal aldri blokkere selve nullstillingen
+        _rå_formatert.clear()
+        read_ratings.clear()
+
+    for fane_navn, nokkel in [(VURDERINGER_FANE, "vurderinger_rader"), (GENERELLE_KOMMENTARER_FANE, "generelle_rader")]:
+        try:
+            ws2 = sh.worksheet(fane_navn)
+        except gspread.WorksheetNotFound:
+            continue
+        rader2 = ws2.get_all_values()
+        resultat[nokkel] = max(0, len(rader2) - 1)
+        header = rader2[0] if rader2 else []
+        ws2.clear()
+        if header:
+            ws2.update([header], range_name=f"A1:{gspread.utils.rowcol_to_a1(1, len(header))}")
+
+    read_vurderinger.clear()
+    read_generelle_kommentarer.clear()
+    read_kommentarer.clear()
+    return resultat
