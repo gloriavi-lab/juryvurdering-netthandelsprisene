@@ -381,25 +381,17 @@ def _har_ulagrede_endringer(navn):
 
 
 @st.dialog("Ulagrede endringer")
-def _bekreft_naviger_bort(navn, forrige_navn):
-    st.write(f"Du har ulagrede endringer i **{navn}**. Vil du lagre før du går videre?")
-    d1, d2, d3 = st.columns(3)
-    if d1.button("Avbryt", use_container_width=True):
+def _bekreft_forkast(melding, naviger_funksjon):
+    """Delt bekreftelsesdialog for BÅDE «← Forrige» og «Lukk» – bevisst KUN
+    to valg (Avbryt / Forkast), ingen «lagre og fortsett»-knapp her: appen
+    skal ha ÉN lagreknapp («Lagre»), ikke en skjult andre lagreknapp gjemt
+    inni denne dialogen."""
+    st.write(melding)
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True):
         st.rerun()
-    if d2.button("Forkast", use_container_width=True):
-        _bytt_til(forrige_navn)
-        st.session_state["_scroll_til_topp"] = True
-        st.rerun()
-    if d3.button("Lagre og gå tilbake", type="primary", use_container_width=True):
-        # Viktig: naviger KUN bort hvis lagringen faktisk lyktes (f.eks. kan
-        # den feile på «mangler kommentar») – ellers ville brukeren miste
-        # feilmeldingen OG bli tatt med bort fra det som trengte retting.
-        # Feiler den, lukkes dialogen uansett (vanlig st.rerun()) og
-        # feilmeldingen vises på siden man allerede er på, via
-        # _lagringstilstand (samme mekanisme som de to andre knappene).
-        if lagre_denne(navn):
-            _bytt_til(forrige_navn)
-            st.session_state["_scroll_til_topp"] = True
+    if c2.button("Forkast og fortsett", type="primary", use_container_width=True):
+        naviger_funksjon()
         st.rerun()
 
 
@@ -540,29 +532,42 @@ def vis_vurderingsvisning():
     # fragmentet, så en fragment-rerun ville aldri sett det som nettopp ble
     # lagret.
     #
-    # Fire kolonner i fast DOM-rekkefølge (forrige, mellomrom, lukk, neste) –
-    # se styles.py for hvordan @media (max-width:640px) omorganiserer og
-    # stabler disse fire på mobil via nth-child. st.container(key=...) gir
-    # den stabile CSS-klassen "st-key-vurdering_knapperad" å style via.
+    # KUN ÉN lagreknapp («Lagre» – lagrer OG åpner neste). «Lukk» og
+    # «← Forrige» lagrer ALDRI – de spør via _bekreft_forkast() hvis det
+    # finnes ulagrede endringer, ellers navigerer de rett. Fire kolonner i
+    # fast DOM-rekkefølge (forrige, mellomrom, lukk, lagre) – se styles.py
+    # for hvordan @media (max-width:640px) omorganiserer og stabler disse
+    # fire på mobil via nth-child. st.container(key=...) gir den stabile
+    # CSS-klassen "st-key-vurdering_knapperad" å style via. kol_lukk/
+    # kol_lagre har LIK bredde (1.2/1.2) med vilje, slik at Streamlit sin
+    # faste kolonne-avstand blir den eneste, jevne avstanden mellom dem.
     with st.container(key="vurdering_knapperad"):
-        kol_forrige, _kol_mellomrom, kol_lukk, kol_neste = st.columns([1.3, 3, 1.1, 1.6])
+        kol_forrige, _kol_mellomrom, kol_lukk, kol_lagre = st.columns([1.3, 3, 1.2, 1.2])
         with kol_forrige:
             if i > 0 and st.button("← Forrige", type="tertiary"):
                 forrige_navn = navn_liste_butikker[i - 1]
-                if _har_ulagrede_endringer(navn):
-                    _bekreft_naviger_bort(navn, forrige_navn)
-                else:
+
+                def _ga_forrige(forrige_navn=forrige_navn):
                     _bytt_til(forrige_navn)
                     st.session_state["_scroll_til_topp"] = True
+
+                if _har_ulagrede_endringer(navn):
+                    _bekreft_forkast(f"Du har endringer i **{navn}** som ikke er lagret. Gå til forrige butikk likevel?", _ga_forrige)
+                else:
+                    _ga_forrige()
                     st.rerun()
         with kol_lukk:
-            if st.button("Lagre og lukk"):
-                if lagre_denne(navn):
-                    st.session_state["_toast_etter_rerun"] = True
+            if st.button("Lukk"):
+                def _lukk():
                     st.session_state["_apnet_butikk"] = None
-                st.rerun()
-        with kol_neste:
-            if st.button("Lagre og neste →", type="primary"):
+
+                if _har_ulagrede_endringer(navn):
+                    _bekreft_forkast("Du har endringer som ikke er lagret – lukk likevel?", _lukk)
+                else:
+                    _lukk()
+                    st.rerun()
+        with kol_lagre:
+            if st.button("Lagre", type="primary"):
                 if lagre_denne(navn):
                     st.session_state["_toast_etter_rerun"] = True
                     neste = neste_uferdige(navn)
