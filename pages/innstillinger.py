@@ -7,9 +7,10 @@ import streamlit as st
 
 from components import status_prikk, topptekst, vis_feil
 from jury import (
-    add_criterion, aktive_kriterier, aktiv_fase, deaktiver_kriterium, fagfelt_liste, kriterier_per_fagfelt,
-    manglende_foreslatte_kriterier, manglende_veiledning_oppdateringer, mine_kriterier, oppdater_kriterium,
-    oppdater_veiledning_rad, read_criteria, read_faser, read_jury, sett_gjeldende_fase, slett_jurymedlem, write_jury,
+    add_criterion, aktive_kriterier, aktiv_fase, deaktiver_kriterium, fagfelt_liste, finn_duplisert_kriterium,
+    kriterier_per_fagfelt, manglende_foreslatte_kriterier, manglende_kriterium_omdopinger,
+    manglende_veiledning_oppdateringer, mine_kriterier, omdop_kriterium, oppdater_kriterium, oppdater_veiledning_rad,
+    read_criteria, read_faser, read_jury, sett_gjeldende_fase, slett_jurymedlem, write_jury,
 )
 from sheets import (
     FASE1_FANE, FASE2_FANE, er_finale_last, fane_oversikt, feilsok_farget_fane, feilsok_vurdering, finale_las_info,
@@ -432,6 +433,59 @@ kriterier_fase3 = aktive_kriterier(alle_kriterier, fase="Fase 3")
 felt_dict = kriterier_per_fagfelt(kriterier_fase3)
 navn_liste_jury = sorted(jury.keys())
 antall_jury_per_kriterium = {k: sum(1 for p in jury.values() if any(kr == k for kr in p["kriterier"])) for liste in felt_dict.values() for k in liste}
+
+st.divider()
+st.subheader("Kriterienavn til godkjenning", anchor=False)
+try:
+    manglende_omdopinger = manglende_kriterium_omdopinger(alle_kriterier)
+except Exception as e:
+    manglende_omdopinger = {}
+    vis_feil("Kunne ikke sjekke kriterienavn", e)
+
+if not manglende_omdopinger:
+    st.success("Ingen kriterienavn venter på oppdatering.", icon=":material/check_circle:")
+else:
+    for gammelt, (fagfelt, nytt) in manglende_omdopinger.items():
+        with st.container(border=True):
+            st.markdown(f"**«{gammelt}»** ({fagfelt}) → **«{nytt}»**")
+            st.caption(
+                f"Oppdaterer Kriterier-fanen, kolonneoverskriften i «{FASE2_FANE}» og i «Jury» – "
+                "jurymedlemmer som hadde dette kriteriet beholder det (samme kolonne, nytt navn)."
+            )
+            if st.button(f"Oppdater til «{nytt}»", key=f"omdop_krit_{gammelt}"):
+                try:
+                    res = omdop_kriterium(sh, fagfelt, gammelt, nytt)
+                except Exception as e:
+                    vis_feil(f"Kunne ikke omdøpe «{gammelt}»", e)
+                else:
+                    mangler = [sted for sted, ok in res["endret"].items() if not ok]
+                    if mangler:
+                        st.warning(f"Oppdatert delvis – fant ikke kolonnen i: {', '.join(mangler)}.", icon=":material/warning:")
+                    st.toast("Omdøpt", icon=":material/check_circle:")
+                    st.rerun()
+
+# «Universell utforming» ble tidligere foreslått under Kundeservice &
+# Tilgjengelighet – foreslås nå i stedet under Førsteinntrykk (se
+# FORESLATTE_TILLEGGSKRITERIER). Tilbyr å deaktivere et ev. aktivt
+# duplikat under det GAMLE fagfeltet (sletter ikke), slik at det ikke står
+# aktivt to steder samtidig.
+_dup_uu = finn_duplisert_kriterium(alle_kriterier, "Universell utforming")
+if _dup_uu:
+    with st.container(border=True):
+        st.warning(
+            f"**«Universell utforming»** er aktivt under **{_dup_uu['fagfelt']}** fra tidligere – det foreslås nå "
+            "i stedet under **Førsteinntrykk** (se «Foreslåtte kriterier» lenger ned). Deaktiver duplikatet her "
+            "(sletter ikke) når det nye er lagt til, så det ikke står aktivt to steder.",
+            icon=":material/warning:",
+        )
+        if st.button(f"Deaktiver «Universell utforming» under {_dup_uu['fagfelt']}", key="deaktiver_dup_universell_utforming"):
+            try:
+                deaktiver_kriterium(sh, "Universell utforming")
+            except Exception as e:
+                vis_feil("Kunne ikke deaktivere", e)
+            else:
+                st.toast("Deaktivert", icon=":material/check_circle:")
+                st.rerun()
 
 st.divider()
 st.subheader("Feilsøking lagring", anchor=False)

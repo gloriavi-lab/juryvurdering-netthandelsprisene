@@ -15,7 +15,10 @@ from collections import defaultdict
 import gspread
 import streamlit as st
 
-from sheets import FORSTE_DATARAD, _bygg_gruppert_header, _header_data, hent_eller_lag_fane
+from sheets import (
+    FASE2_FANE, FORSTE_DATARAD, _bygg_gruppert_header, _header_data, _rå_formatert, hent_eller_lag_fane,
+    read_ratings, sikkerhetskopier_alle_faner,
+)
 
 KRITERIER_FANE = "Kriterier"
 JURY_FANE = "Jury"
@@ -95,7 +98,7 @@ FORESLATTE_TILLEGGSKRITERIER = [
         "eksempler": "", "faser": ["Fase 3"],
     },
     {
-        "fagfelt": "Kundeservice & Tilgjengelighet", "kriterium": "Universell utforming",
+        "fagfelt": "Førsteinntrykk", "kriterium": "Universell utforming",
         "kort": "Hvor godt nettbutikken er tilrettelagt for brukere med ulike behov (syn, hørsel, motorikk, kognisjon).",
         "utfyllende": _UNIVERSELL_UTFORMING_UTFYLLENDE,
         "skala1": "Store hindringer for brukere med nedsatt funksjonsevne – f.eks. umulig å navigere med tastatur, manglende alt-tekst, dårlig kontrast.",
@@ -108,9 +111,45 @@ FORESLATTE_TILLEGGSKRITERIER = [
 
 def manglende_foreslatte_kriterier(alle_kriterier):
     """De av FORESLATTE_TILLEGGSKRITERIER som ikke allerede finnes (uansett
-    aktiv/inaktiv) i det faktiske, levende Kriterier-arket."""
-    eksisterende_navn = {k["kriterium"] for k in alle_kriterier}
-    return [f for f in FORESLATTE_TILLEGGSKRITERIER if f["kriterium"] not in eksisterende_navn]
+    aktiv/inaktiv) UNDER NØYAKTIG DET SAMME FAGFELTET i det faktiske,
+    levende Kriterier-arket – matcher på (kriterium, fagfelt), ikke bare
+    navn, slik at f.eks. «Universell utforming» fortsatt tilbys under det
+    NYE fagfeltet (Førsteinntrykk) selv om et likelydende kriterium alt
+    finnes under et annet, gammelt fagfelt (se finn_duplisert_kriterium)."""
+    eksisterende = {(k["kriterium"], k["fagfelt"]) for k in alle_kriterier}
+    return [f for f in FORESLATTE_TILLEGGSKRITERIER if (f["kriterium"], f["fagfelt"]) not in eksisterende]
+
+
+def finn_duplisert_kriterium(alle_kriterier, kriterium_navn):
+    """Returnerer det AKTIVE kriteriet med dette navnet hvis det finnes et
+    ANNET sted enn fagfeltet FORESLATTE_TILLEGGSKRITERIER nå foreslår for
+    samme navn – brukes til å tilby deaktivering i Innstillinger, slik at
+    et kriterium ikke ender opp aktivt to steder samtidig etter at det er
+    flyttet til et nytt fagfelt (f.eks. «Universell utforming» som nå
+    foreslås under Førsteinntrykk i stedet for Kundeservice & Tilgjengelighet)."""
+    nytt_forslag = next((f for f in FORESLATTE_TILLEGGSKRITERIER if f["kriterium"] == kriterium_navn), None)
+    if not nytt_forslag:
+        return None
+    return next(
+        (k for k in alle_kriterier if k["kriterium"] == kriterium_navn and k["aktiv"] and k["fagfelt"] != nytt_forslag["fagfelt"]),
+        None,
+    )
+
+
+_KRITERIUM_OMDOPINGER = {"E-post": "Kundeklubb, nyhetsbrev, e-post og SMS"}
+
+
+def manglende_kriterium_omdopinger(alle_kriterier):
+    """{gammelt_navn: (fagfelt, nytt_navn)} for kriterier som fortsatt heter
+    det gamle, avtalte navnet i det levende arket – fagfeltet LESES fra
+    selve kriteriet (ikke hardkodet), slik at det ikke spiller noen rolle
+    nøyaktig hvordan fagfelt-navnet er stavet i akkurat dette regnearket."""
+    eksisterende = {k["kriterium"]: k["fagfelt"] for k in alle_kriterier}
+    return {
+        gammelt: (eksisterende[gammelt], nytt)
+        for gammelt, nytt in _KRITERIUM_OMDOPINGER.items()
+        if gammelt in eksisterende and nytt not in eksisterende
+    }
 
 
 def _seed_kriterier_rader():
@@ -212,6 +251,52 @@ def oppdater_kriterium(sh, kriterium_tekst, **felter):
                 read_criteria.clear()
             return True
     return False
+
+
+def omdop_kriterium(sh, fagfelt, gammelt_navn, nytt_navn):
+    """Endrer et kriteriums NAVN overalt det brukes – Kriterier-fanens egen
+    rad, kolonneoverskriften i FASE2_FANE («Rangering ekspertvurdering»), og
+    kolonneoverskriften i Jury-fanen – UTEN å røre selve kolonnen/raden
+    (posisjonen bevares), slik at eksisterende scorer, kommentarer og
+    jury-tildelinger følger automatisk med (de er knyttet til CELLEN, ikke
+    navnet). Tar sikkerhetskopi av alt først. Returnerer hva som faktisk ble
+    funnet og endret, slik at admin-UI kan vise det tydelig i stedet for å
+    anta at alle tre stedene fantes."""
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+    endret = {"kriterier": False, "fase2": False, "jury": False}
+
+    ws_krit = sikre_kriterier_fane(sh)
+    rader = ws_krit.get_all_values()
+    for i, rad in enumerate(rader[1:], start=2):
+        if len(rad) >= 2 and rad[1] == gammelt_navn:
+            ws_krit.update([[nytt_navn]], range_name=f"B{i}")
+            endret["kriterier"] = True
+            break
+    read_criteria.clear()
+
+    try:
+        ws_fase2 = sh.worksheet(FASE2_FANE)
+        _, krit_fase2, _ = _header_data(ws_fase2)
+        kolonne = krit_fase2.get((fagfelt, gammelt_navn))
+        if kolonne:
+            ws_fase2.update([[nytt_navn]], range_name=gspread.utils.rowcol_to_a1(2, kolonne))
+            endret["fase2"] = True
+    except gspread.WorksheetNotFound:
+        pass
+    _header_data.clear()
+    _rå_formatert.clear()
+    read_ratings.clear()
+
+    ws_jury = sikre_jury_fane(sh)
+    _, krit_jury, _ = _header_data(ws_jury, grunnkolonner=JURY_GRUNNKOLONNER)
+    kolonne_jury = krit_jury.get((fagfelt, gammelt_navn))
+    if kolonne_jury:
+        ws_jury.update([[nytt_navn]], range_name=gspread.utils.rowcol_to_a1(2, kolonne_jury))
+        endret["jury"] = True
+    _header_data.clear()
+    read_jury.clear()
+
+    return {"backup": backup_navn, "endret": endret}
 
 
 # ─────────────────────────────────────────────
