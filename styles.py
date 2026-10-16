@@ -176,6 +176,38 @@ div[class*="st-key-butikkrad_ferdig_"] {{ background: rgba(30,142,90,0.06); }}
 @media (max-width: 640px) {{
     div[class*="st-key-butikkrad_"] {{ padding:2px; }}
 }}
+
+/* Handlingsraden i vurderingsskjemaet (← Forrige / Lagre og lukk / Lagre og
+   neste →) – fire kolonner i DOM-rekkefølge (forrige, mellomrom, lukk,
+   neste). nth-child brukes til å omorganisere/stable dem på mobil uten å
+   måtte endre selve Python-koden for layouten. OBS: Streamlit legger et
+   ekstra stLayoutWrapper-nivå mellom containeren og stHorizontalBlock, og
+   hver kolonne sin data-testid er "stColumn" (ikke "column") – bekreftet
+   ved å dumpe faktisk DOM, ikke antatt. */
+.vurdering-neste-tekst {{ font-size:12.5px; color:var(--tekst-dempet); margin-bottom:6px; }}
+@media (max-width: 640px) {{
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] {{
+        flex-direction: column;
+        gap: 8px;
+    }}
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {{
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }}
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(1) {{ order: 3; text-align:center; }}
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(2) {{ display: none; }}
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(3) {{ order: 2; }}
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) {{ order: 1; }}
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(3) div[data-testid="stElementContainer"],
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) div[data-testid="stElementContainer"],
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(3) div[data-testid="stButton"],
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) div[data-testid="stButton"],
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(3) button,
+    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) button {{
+        width: 100% !important;
+    }}
+}}
 </style>
 """
 

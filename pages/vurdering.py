@@ -355,6 +355,54 @@ def _gyldig_status_tekst(navn):
     return {"Ferdig": "✅ Ferdig", "Påbegynt": "◐ Påbegynt", "Ikke startet": "○ Ikke startet"}[s]
 
 
+def _har_ulagrede_endringer(navn):
+    """Sammenligner det som faktisk STÅR i skjemaet nå (session_state) mot
+    sist lagrede verdi (den fargede fanen for score, loggen for MIN egen
+    kommentar) – brukt av «← Forrige» til å avgjøre om den skal spørre før
+    den navigerer bort fra noe som ikke er lagret ennå."""
+    for krit in mine_kriterier_flat:
+        valg = st.session_state.get(f"seg_{navn}_{krit}")
+        kommentar_na = (st.session_state.get(f"kom_krit_{navn}_{krit}") or "").strip()
+        if valg == "Kan ikke vurdere":
+            verdi_na = IKKE_VURDERT
+        elif valg is not None:
+            verdi_na = str(valg)
+        else:
+            verdi_na = None
+        verdi_lagret = fargede_fane_data.get(navn, {}).get("scorer", {}).get(krit)
+        if normalize_score(verdi_na) != normalize_score(verdi_lagret):
+            return True
+        kommentar_lagret = mine_oppslag.get((navn, krit), {}).get("kommentar") or ""
+        if kommentar_na != kommentar_lagret:
+            return True
+    generell_na = (st.session_state.get(f"generell_{navn}") or "").strip()
+    generell_lagret = next((g["kommentar"] for g in generell_per_butikk.get(navn, []) if g["jurymedlem"] == jurynavn), "")
+    return generell_na != (generell_lagret or "")
+
+
+@st.dialog("Ulagrede endringer")
+def _bekreft_naviger_bort(navn, forrige_navn):
+    st.write(f"Du har ulagrede endringer i **{navn}**. Vil du lagre før du går videre?")
+    d1, d2, d3 = st.columns(3)
+    if d1.button("Avbryt", use_container_width=True):
+        st.rerun()
+    if d2.button("Forkast", use_container_width=True):
+        _bytt_til(forrige_navn)
+        st.session_state["_scroll_til_topp"] = True
+        st.rerun()
+    if d3.button("Lagre og gå tilbake", type="primary", use_container_width=True):
+        # Viktig: naviger KUN bort hvis lagringen faktisk lyktes (f.eks. kan
+        # den feile på «mangler kommentar») – ellers ville brukeren miste
+        # feilmeldingen OG bli tatt med bort fra det som trengte retting.
+        # Feiler den, lukkes dialogen uansett (vanlig st.rerun()) og
+        # feilmeldingen vises på siden man allerede er på, via
+        # _lagringstilstand (samme mekanisme som de to andre knappene).
+        if lagre_denne(navn):
+            _bytt_til(forrige_navn)
+            st.session_state["_scroll_til_topp"] = True
+        st.rerun()
+
+
 @st.fragment
 def vis_vurderingsvisning():
     navn = st.session_state.get("_apnet_butikk")
@@ -382,17 +430,22 @@ def vis_vurderingsvisning():
         if info.get("url"):
             st.link_button("Besøk butikk", info["url"], icon=":material/open_in_new:", use_container_width=True)
 
-    # Bevisst INGEN key= her: en nøkkel ville gitt widgeten sin egen
-    # session_state-verdi, og Streamlit tillater IKKE at noe (f.eks.
-    # _bytt_til, kalt fra knappene under) skriver til den etter at widgeten
-    # alt er tegnet i samme kjøring ("cannot be modified after the widget …
-    # is instantiated" – en reell feil jeg traff under testing). Uten key=
-    # leser den i stedet alltid index=i fra den FAKTISK åpne butikken
-    # (satt trygt av _bytt_til i forrige kjøring, via _apnet_butikk), og
-    # fanger fortsatt opp når BRUKEREN selv velger noe annet i den.
+    # VIKTIG (fant roten til "Lagre og neste går ikke videre"-feilen): denne
+    # hadde FØR ingen key=, i troen på at den da alltid ville lese index=i
+    # friskt. I praksis kunne Streamlit likevel gjenbruke sin egen, forrige
+    # viste verdi på tvers av et fullt st.rerun() når butikken byttet via
+    # knappene under (samme auto-genererte widget-identitet) – med resultat
+    # at "hopp_til != navn" ble SANN rett etter et bytte (selv om BRUKEREN
+    # ikke rørte denne selectboksen), noe som trigget en UMIDDELBAR
+    # _bytt_til(hopp_til) TILBAKE til den gamle butikken, i SAMME kjøring
+    # som bare NETTOPP hadde byttet TIL den nye. Derfor så det ut som
+    # «Lagre og neste →» ikke gjorde noe. Fiks: en key= SCOPET TIL
+    # butikknavnet gir en HELT NY, aldri-før-sett widget hver gang butikken
+    # bytter – da er det umulig for den å «arve» en gammel verdi.
     hopp_til = st.selectbox(
         "Hopp direkte til en annen butikk", navn_liste_butikker,
         index=i, format_func=lambda n: f"{_gyldig_status_tekst(n).split(' ')[0]} {n}",
+        key=f"hopp_til_{navn}",
     )
     if hopp_til != navn:
         lagre_denne(navn)
@@ -434,15 +487,8 @@ def vis_vurderingsvisning():
             valg = st.segmented_control("Score", [1, 2, 3, 4, 5, "Kan ikke vurdere"], key=seg_key, label_visibility="collapsed")
 
             pakrevd = isinstance(valg, (int, float)) and valg <= 3
-            anbefalt = isinstance(valg, (int, float)) and valg >= 4
-            if pakrevd:
-                kommentar_label = " (påkrevd)"
-            elif anbefalt:
-                kommentar_label = " (anbefalt)"
-            else:
-                kommentar_label = " (valgfritt)"
             st.text_area(
-                "Kommentar" + kommentar_label, value=eksisterende.get("kommentar", ""),
+                "Kommentar", value=eksisterende.get("kommentar", ""),
                 key=kom_key, placeholder=f"Kommentar til «{krit}»" + (" – påkrevd ved lav score" if pakrevd else "…"),
                 height=68,
             )
@@ -478,6 +524,10 @@ def vis_vurderingsvisning():
     if tilstand:
         lagringsstatus(tilstand[0], tilstand[1])
 
+    _neste_navn_tekst = neste_uferdige(navn)
+    if _neste_navn_tekst:
+        st.markdown(f'<div class="vurdering-neste-tekst">Neste: {_neste_navn_tekst}</div>', unsafe_allow_html=True)
+
     # NB: IKKE on_click-callbacks her – Streamlit behandler st.rerun() kalt
     # INNE i en on_click-callback som en no-op (bekreftet empirisk: en
     # tidligere callback-basert variant viste Streamlit sin egen advarsel
@@ -489,27 +539,39 @@ def vis_vurderingsvisning():
     # statuskortene beregnes KUN øverst i scriptet, utenfor dette
     # fragmentet, så en fragment-rerun ville aldri sett det som nettopp ble
     # lagret.
-    a1, a2, a3 = st.columns([1, 1.2, 1])
-    if a1.button("← Forrige", disabled=(i == 0), use_container_width=True):
-        lagre_denne(navn)
-        _bytt_til(navn_liste_butikker[max(0, i - 1)])
-        st.session_state["_scroll_til_topp"] = True
-        st.rerun()
-    if a2.button("💾 Lagre og neste →", type="primary", use_container_width=True):
-        if lagre_denne(navn):
-            st.session_state["_toast_etter_rerun"] = True
-            neste = neste_uferdige(navn)
-            if neste:
-                _bytt_til(neste)
-                st.session_state["_scroll_til_topp"] = True
-            else:
-                st.session_state["_apnet_butikk"] = None
-        st.rerun()
-    if a3.button("Lagre og lukk", use_container_width=True):
-        if lagre_denne(navn):
-            st.session_state["_toast_etter_rerun"] = True
-            st.session_state["_apnet_butikk"] = None
-        st.rerun()
+    #
+    # Fire kolonner i fast DOM-rekkefølge (forrige, mellomrom, lukk, neste) –
+    # se styles.py for hvordan @media (max-width:640px) omorganiserer og
+    # stabler disse fire på mobil via nth-child. st.container(key=...) gir
+    # den stabile CSS-klassen "st-key-vurdering_knapperad" å style via.
+    with st.container(key="vurdering_knapperad"):
+        kol_forrige, _kol_mellomrom, kol_lukk, kol_neste = st.columns([1.3, 3, 1.1, 1.6])
+        with kol_forrige:
+            if i > 0 and st.button("← Forrige", type="tertiary"):
+                forrige_navn = navn_liste_butikker[i - 1]
+                if _har_ulagrede_endringer(navn):
+                    _bekreft_naviger_bort(navn, forrige_navn)
+                else:
+                    _bytt_til(forrige_navn)
+                    st.session_state["_scroll_til_topp"] = True
+                    st.rerun()
+        with kol_lukk:
+            if st.button("Lagre og lukk"):
+                if lagre_denne(navn):
+                    st.session_state["_toast_etter_rerun"] = True
+                    st.session_state["_apnet_butikk"] = None
+                st.rerun()
+        with kol_neste:
+            if st.button("Lagre og neste →", type="primary"):
+                if lagre_denne(navn):
+                    st.session_state["_toast_etter_rerun"] = True
+                    neste = neste_uferdige(navn)
+                    if neste:
+                        _bytt_til(neste)
+                        st.session_state["_scroll_til_topp"] = True
+                    else:
+                        st.session_state["_apnet_butikk"] = None
+                st.rerun()
 
 
 FANE_STATUS = {"gjenstar": "Ikke startet", "pabegynt": "Påbegynt", "ferdig": "Ferdig", "alle": None}
