@@ -40,7 +40,11 @@ def vis_feil(melding: str, e: Exception):
 
 def topptekst(sidetittel: str):
     """Toppområde med merke/tittel til venstre, og tilkoblingsstatus + valgt
-    jurymedlem til høyre (sidepanelet er fjernet, se app.py)."""
+    jurymedlem til høyre (sidepanelet er fjernet, se app.py).
+
+    Setter også _gjeldende_side – lesés av sheets._med_tidtaking() for å vise
+    hvilken side hvert Sheets-API-kall skjedde fra i Innstillinger → Ytelse."""
+    st.session_state["_gjeldende_side"] = sidetittel
     sh = st.session_state.get("_sh")
     jurynavn = st.session_state.get("_jurynavn")
     fagfelt = st.session_state.get("_fagfelt")

@@ -36,6 +36,8 @@ aldri radnummer) når den skriver til en eksisterende fane.
 """
 
 import re
+import time
+from collections import deque
 
 import gspread
 import streamlit as st
@@ -59,13 +61,50 @@ FORSTE_DATARAD = 3  # rad 1-2 er overskrifter, se modulens docstring
 # ─────────────────────────────────────────────
 # Tilkobling
 # ─────────────────────────────────────────────
+# Ytelsesmåling (se Innstillinger → Ytelse): ALLE gspread-kall går gjennom
+# ÉTT sted – http_client.request() – så tidtaking pakkes inn DER i stedet
+# for rundt hvert eneste kall-sted i sheets.py/jury.py enkeltvis. NB: gc er
+# @st.cache_resource (prosessvidt, delt av ALLE brukere samtidig), så denne
+# loggen viser samlet trafikk for hele appen – fortsatt nyttig for å se
+# hvilke SIDER/handlinger som er tregest totalt sett, bare ikke isolert per
+# bruker. Begrenset til de siste 500 kallene (deque maxlen) for å unngå at
+# minnebruken vokser ubegrenset over en lang kjøretid.
+_API_KALL_LOGG = deque(maxlen=500)
+
+
+def _instrumenter_klient(gc):
+    opprinnelig_request = gc.http_client.request
+
+    def _med_tidtaking(method, endpoint, *args, **kwargs):
+        start = time.monotonic()
+        try:
+            return opprinnelig_request(method, endpoint, *args, **kwargs)
+        finally:
+            _API_KALL_LOGG.append({
+                "tid": naa_norsk().strftime("%H:%M:%S"),
+                "metode": method,
+                "endepunkt": str(endpoint).split("?")[0][-70:],
+                "varighet_ms": round((time.monotonic() - start) * 1000, 1),
+                "side": st.session_state.get("_gjeldende_side", "?"),
+            })
+
+    gc.http_client.request = _med_tidtaking
+    return gc
+
+
+def hent_api_kall_logg():
+    """Kopi av de siste (maks 500) målte Sheets-API-kallene, nyeste sist –
+    til bruk i Innstillinger → Ytelse. Rører ikke selve loggen."""
+    return list(_API_KALL_LOGG)
+
+
 @st.cache_resource(ttl=3600, show_spinner=False)
 def _gc_klient():
     try:
         creds_info = st.secrets["gcp_service_account"]
         scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
         creds = Credentials.from_service_account_info(creds_info, scopes=scope)
-        return gspread.authorize(creds)
+        return _instrumenter_klient(gspread.authorize(creds))
     except Exception as e:
         st.session_state["_gsheets_feil"] = str(e)
         return None
@@ -367,7 +406,7 @@ def _les_butikkliste(ws, grunn):
     return butikker, advarsler
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def read_stores(_sh):
     """Returnerer (butikker, advarsler) fra Fase 1-fanen (butikklisten endrer
     seg ikke mellom fasene – kun vurderingene gjør)."""

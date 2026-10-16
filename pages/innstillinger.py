@@ -3,6 +3,8 @@ Butikklisten kommer direkte fra "Rangering fase 1"-fanen – ingen Excel-
 opplasting her lenger (se brief del 3: regnearket ER fasiten, appen bygger
 ingen egen struktur)."""
 
+from collections import defaultdict
+
 import streamlit as st
 
 from components import status_prikk, topptekst, vis_feil
@@ -16,9 +18,10 @@ from sheets import (
     FASE1_FANE, FASE2_FANE, GENERELLE_KOMMENTARER_FANE, er_finale_last, fane_oversikt, feilsok_farget_fane,
     feilsok_vurdering, finale_las_info, fjern_finale_las, flytt_fane_til_forst, konverter_scorer_til_tall,
     KOMMENTARER_FANE, legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, merk_som_arkiv, migrer_orphan_fane,
-    migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane, nullstill_vurderinger, read_fase1_scores,
-    read_ratings, read_stores, read_vurderinger, sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner,
-    sjekk_gammel_fane_for_orphan_data, test_tilkobling, VURDERINGER_FANE,
+    hent_api_kall_logg, migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane, nullstill_vurderinger,
+    read_fase1_scores, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger,
+    sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner, sjekk_gammel_fane_for_orphan_data,
+    test_tilkobling, VURDERINGER_FANE,
 )
 from theme import FAGFELT_FARGE
 
@@ -50,10 +53,23 @@ if sh:
         )
     bc1, bc2, bc3 = st.columns(3)
     bc1.link_button("Åpne regnearket", sh.url, icon=":material/open_in_new:", use_container_width=True)
-    if bc2.button("Hent siste fra regnearket", icon=":material/refresh:", use_container_width=True, help="Tømmer mellomlagringen – nyttig rett etter du har redigert noe manuelt i Sheets."):
+    if bc2.button(
+        "Hent siste fra regnearket", icon=":material/refresh:", use_container_width=True,
+        help=(
+            "Tømmer ALL mellomlagring – nyttig rett etter du har redigert noe manuelt i Sheets. Flere av "
+            "cachene (kriterier/jury/faser/veiledning/butikkliste) varer nå 10 minutter i stedet for 30–120 "
+            "sekunder, siden de sjelden endres – denne knappen er «tving fram nå» i mellomtiden."
+        ),
+    ):
         read_stores.clear()
         read_ratings.clear()
         read_fase1_scores.clear()
+        read_criteria.clear()
+        read_jury.clear()
+        read_faser.clear()
+        read_vurderinger.clear()
+        read_generelle_kommentarer.clear()
+        fane_oversikt.clear()
         st.toast("Hentet siste versjon fra regnearket.", icon=":material/check_circle:")
         st.rerun()
     if bc3.button("Test tilkobling", icon=":material/network_check:", use_container_width=True):
@@ -74,6 +90,42 @@ else:
     with st.expander("Feilmelding"):
         st.code(st.session_state.get("_gsheets_feil", "Ukjent feil"))
     st.stop()
+
+st.divider()
+st.subheader("Ytelse", anchor=False)
+st.caption(
+    "Måler faktisk tidsbruk for hvert Sheets-API-kall appen gjør (de siste 500). NB: tilkoblingen er delt av "
+    "ALLE som bruker appen samtidig, så loggen viser samlet trafikk for hele appen, ikke bare din egen økt – "
+    "fortsatt nyttig for å se hvilke sider/handlinger som faktisk er tregest, i stedet for å gjette."
+)
+_api_logg = hent_api_kall_logg()
+if not _api_logg:
+    st.caption("Ingen kall målt ennå i denne kjøringen (nullstilles når appen restarter).")
+else:
+    _total_tid = sum(k["varighet_ms"] for k in _api_logg)
+    st.markdown(f"**{len(_api_logg)} kall målt · {_total_tid / 1000:.1f} sekunder totalt · {_total_tid / len(_api_logg):.0f} ms i snitt**")
+
+    _per_side = defaultdict(lambda: {"antall": 0, "tid_ms": 0.0})
+    for _k in _api_logg:
+        _per_side[_k["side"]]["antall"] += 1
+        _per_side[_k["side"]]["tid_ms"] += _k["varighet_ms"]
+    with st.expander("Per side", expanded=True):
+        st.dataframe(
+            sorted(
+                [
+                    {"Side": side, "Antall kall": v["antall"], "Total tid (ms)": round(v["tid_ms"]), "Snitt (ms)": round(v["tid_ms"] / v["antall"])}
+                    for side, v in _per_side.items()
+                ],
+                key=lambda r: -r["Total tid (ms)"],
+            ),
+            hide_index=True, use_container_width=True,
+        )
+    with st.expander("10 treigeste enkeltkall"):
+        _treigeste = sorted(_api_logg, key=lambda k: -k["varighet_ms"])[:10]
+        st.dataframe(
+            [{"Tid": k["tid"], "Side": k["side"], "Metode": k["metode"], "Endepunkt": k["endepunkt"], "Varighet (ms)": k["varighet_ms"]} for k in _treigeste],
+            hide_index=True, use_container_width=True,
+        )
 
 try:
     butikker, advarsler = read_stores(sh)
@@ -561,55 +613,68 @@ if _dup_uu:
 
 st.divider()
 st.subheader("Feilsøking lagring", anchor=False)
-st.markdown(f"Tilkoblet regneark akkurat nå: **{sh.title}** (ID `{sh.id}`)")
 st.caption(
     f"Slår opp nøyaktig det appen leser for ÉN butikk + ETT jurymedlem, i BÅDE den fargede fanen (det som "
     f"faktisk vises) og «{VURDERINGER_FANE}»-loggen – rå verdi (med type), normalisert verdi, og hva skjemaet "
-    "faktisk ville vist. Leser alltid ferskt (hopper forbi mellomlagringen)."
+    "faktisk ville vist. Leser alltid ferskt (hopper forbi mellomlagringen) – lastes derfor IKKE før du "
+    "eksplisitt åpner den, for ikke å gjøre hver side-visning tyngre enn nødvendig."
 )
-fdc1, fdc2 = st.columns(2)
-feilsok_jurymedlem = fdc1.selectbox("Jurymedlem", navn_liste_jury, key="_feilsok_jurymedlem") if navn_liste_jury else None
-feilsok_butikk = fdc2.selectbox("Butikk", sorted(butikker.keys()), key="_feilsok_butikk") if butikker else None
+if not st.session_state.get("_vis_feilsoking_lagring"):
+    if st.button("Åpne feilsøking", icon=":material/bug_report:"):
+        st.session_state["_vis_feilsoking_lagring"] = True
+        st.rerun()
+else:
+    @st.fragment
+    def vis_feilsoking_lagring():
+        """Egen fragment: å bytte jurymedlem/butikk her kjører KUN denne
+        seksjonen på nytt (inkl. de alltid-ferske feilsøkingskallene) – ikke
+        resten av Innstillinger."""
+        st.markdown(f"Tilkoblet regneark akkurat nå: **{sh.title}** (ID `{sh.id}`)")
+        fdc1, fdc2 = st.columns(2)
+        feilsok_jurymedlem = fdc1.selectbox("Jurymedlem", navn_liste_jury, key="_feilsok_jurymedlem") if navn_liste_jury else None
+        feilsok_butikk = fdc2.selectbox("Butikk", sorted(butikker.keys()), key="_feilsok_butikk") if butikker else None
 
-if feilsok_jurymedlem and feilsok_butikk:
-    mine_krit = sorted(mine_kriterier(jury, feilsok_jurymedlem))
-    if not mine_krit:
-        st.info(f"{feilsok_jurymedlem} har ingen kriterier tildelt.", icon=":material/info:")
-    else:
-        krit_til_fagfelt_fs = {k: felt for felt, kriterier in felt_dict.items() for k in kriterier}
+        if feilsok_jurymedlem and feilsok_butikk:
+            mine_krit = sorted(mine_kriterier(jury, feilsok_jurymedlem))
+            if not mine_krit:
+                st.info(f"{feilsok_jurymedlem} har ingen kriterier tildelt.", icon=":material/info:")
+            else:
+                krit_til_fagfelt_fs = {k: felt for felt, kriterier in felt_dict.items() for k in kriterier}
 
-        st.markdown(f"**Den fargede fanen («{FASE2_FANE}») – det som faktisk vises i appen**")
-        rader_grid = feilsok_farget_fane(sh, feilsok_butikk, [(krit_til_fagfelt_fs.get(k, ""), k) for k in mine_krit])
-        st.dataframe(
-            [
-                {
-                    "Kriterium": r["kriterium"], "Celle": r["celle"],
-                    "Rå verdi": r["rå_score"], "Type": r["rå_score_type"],
-                    "Normalisert": r["normalisert_score"], "Notat": r["rå_notat"],
-                    "Ville vist i skjema": (
-                        "– (ikke besvart)" if r["normalisert_score"] is None
-                        else ("Kan ikke vurdere" if r["normalisert_score"] == "Kan ikke vurdere" else f"{r['normalisert_score']} markert")
-                    ),
-                }
-                for r in rader_grid
-            ],
-            hide_index=True, use_container_width=True,
-        )
+                st.markdown(f"**Den fargede fanen («{FASE2_FANE}») – det som faktisk vises i appen**")
+                rader_grid = feilsok_farget_fane(sh, feilsok_butikk, [(krit_til_fagfelt_fs.get(k, ""), k) for k in mine_krit])
+                st.dataframe(
+                    [
+                        {
+                            "Kriterium": r["kriterium"], "Celle": r["celle"],
+                            "Rå verdi": r["rå_score"], "Type": r["rå_score_type"],
+                            "Normalisert": r["normalisert_score"], "Notat": r["rå_notat"],
+                            "Ville vist i skjema": (
+                                "– (ikke besvart)" if r["normalisert_score"] is None
+                                else ("Kan ikke vurdere" if r["normalisert_score"] == "Kan ikke vurdere" else f"{r['normalisert_score']} markert")
+                            ),
+                        }
+                        for r in rader_grid
+                    ],
+                    hide_index=True, use_container_width=True,
+                )
 
-        st.markdown(f"**«{VURDERINGER_FANE}»-loggen – {feilsok_jurymedlem} sine egne rader**")
-        rader_feilsok = feilsok_vurdering(sh, feilsok_butikk, feilsok_jurymedlem, mine_krit)
-        st.dataframe(
-            [
-                {
-                    "Kriterium": r["kriterium"], "Celle": r["celle"],
-                    "Rå verdi": r["rå_score"], "Type": r["rå_score_type"],
-                    "Normalisert": r["normalisert_score"], "Kommentar (rå)": r["rå_kommentar"],
-                }
-                for r in rader_feilsok
-            ],
-            hide_index=True, use_container_width=True,
-        )
-        st.caption("«Rå verdi»/«Type» er nøyaktig det `get_all_values()` returnerte fra Google Sheets, før noe i appen har tolket det.")
+                st.markdown(f"**«{VURDERINGER_FANE}»-loggen – {feilsok_jurymedlem} sine egne rader**")
+                rader_feilsok = feilsok_vurdering(sh, feilsok_butikk, feilsok_jurymedlem, mine_krit)
+                st.dataframe(
+                    [
+                        {
+                            "Kriterium": r["kriterium"], "Celle": r["celle"],
+                            "Rå verdi": r["rå_score"], "Type": r["rå_score_type"],
+                            "Normalisert": r["normalisert_score"], "Kommentar (rå)": r["rå_kommentar"],
+                        }
+                        for r in rader_feilsok
+                    ],
+                    hide_index=True, use_container_width=True,
+                )
+                st.caption("«Rå verdi»/«Type» er nøyaktig det `get_all_values()` returnerte fra Google Sheets, før noe i appen har tolket det.")
+
+    vis_feilsoking_lagring()
 
 
 def _sheets_feilboks(e, handling="lagre"):
@@ -766,79 +831,93 @@ def kriterium_dialog(redigerer_kriterium=None, forslag=None):
                     _sheets_feilboks(e)
 
 
-fane_jury, fane_kriterier = st.tabs(["Jury", "Kriterier"])
+@st.fragment
+def vis_jury_og_kriterier_tabs():
+    """Egen fragment: klikk her (fanebytte, Rediger, Legg til) kjører KUN
+    denne delen på nytt – ikke resten av Innstillinger (Ytelse-logg,
+    fane-oversikt, veiledning/kriterienavn-sjekker osv.), se punkt 7 om
+    ytelse. Dialogene (jury_dialog/kriterium_dialog) sine TERMINALE
+    handlinger (Lagre/Ja, fjern) bruker fortsatt vanlig st.rerun() – det
+    bryter ALLTID ut til en full siderefresh uansett fragment, siden en
+    dialog sin innmat også er en fragment i Streamlit (se forklaringen ved
+    _bekreft_slett_jury) – så resten av siden oppdateres fortsatt riktig
+    når noe faktisk er lagret/slettet."""
+    fane_jury, fane_kriterier = st.tabs(["Jury", "Kriterier"])
 
-with fane_jury:
-    manglende = [k for k, antall in antall_jury_per_kriterium.items() if antall == 0]
-    if manglende:
-        st.warning(f"{len(manglende)} kriterier mangler jurymedlem.", icon=":material/warning:")
-        with st.expander("Vis hvilke"):
-            for fagfelt, kriterier in felt_dict.items():
-                manglende_i_felt = [k for k in kriterier if k in manglende]
-                if manglende_i_felt:
-                    farge_mangel = FAGFELT_FARGE.get(fagfelt, "#888")
-                    st.markdown(f"<span style='color:{farge_mangel};font-weight:700;'>{fagfelt}</span>", unsafe_allow_html=True)
-                    for k in manglende_i_felt:
-                        st.caption(f"• {k}")
+    with fane_jury:
+        manglende = [k for k, antall in antall_jury_per_kriterium.items() if antall == 0]
+        if manglende:
+            st.warning(f"{len(manglende)} kriterier mangler jurymedlem.", icon=":material/warning:")
+            with st.expander("Vis hvilke"):
+                for fagfelt, kriterier in felt_dict.items():
+                    manglende_i_felt = [k for k in kriterier if k in manglende]
+                    if manglende_i_felt:
+                        farge_mangel = FAGFELT_FARGE.get(fagfelt, "#888")
+                        st.markdown(f"<span style='color:{farge_mangel};font-weight:700;'>{fagfelt}</span>", unsafe_allow_html=True)
+                        for k in manglende_i_felt:
+                            st.caption(f"• {k}")
 
-    if st.button("Legg til jurymedlem", type="primary", icon=":material/person_add:"):
-        jury_dialog()
+        if st.button("Legg til jurymedlem", type="primary", icon=":material/person_add:"):
+            jury_dialog()
 
-    st.write("")
-    if not navn_liste_jury:
-        st.caption("Ingen jurymedlemmer lagt til ennå.")
-    for navn in navn_liste_jury:
-        mine = jury[navn]["kriterier"]
-        with st.container(border=True):
-            rc1, rc2 = st.columns([4, 1])
-            with rc1:
-                st.markdown(f"**{navn}**")
-                if mine:
-                    merkelapper = "".join(
-                        f'<span class="klasse-badge" style="margin:2px 4px 2px 0;border-color:{FAGFELT_FARGE.get(fagfelt, "#888")};">{k}</span>'
-                        for fagfelt, kriterier in felt_dict.items() for k in kriterier if k in mine
-                    )
-                    st.markdown(merkelapper, unsafe_allow_html=True)
-                    st.caption(f"{len(mine)} kriterier")
-                else:
-                    st.caption("Ingen kriterier tildelt")
-            with rc2:
-                if st.button("Rediger", key=f"rediger_jury_{navn}", use_container_width=True):
-                    jury_dialog(navn)
-
-with fane_kriterier:
-    manglende_forslag = manglende_foreslatte_kriterier(alle_kriterier)
-    if manglende_forslag:
-        with st.container(border=True):
-            st.markdown("**Foreslåtte kriterier som ikke er lagt til ennå**")
-            st.caption("Tekst foreslått/godkjent tidligere, men aldri faktisk skrevet inn i dette regnearket – juster gjerne før du lagrer.")
-            for f in manglende_forslag:
-                fkc1, fkc2 = st.columns([5, 1])
-                fkc1.markdown(f"**{f['kriterium']}** _({f['fagfelt']})_ — {f['kort']}")
-                if fkc2.button("Legg til", key=f"legg_til_forslag_{f['kriterium']}", use_container_width=True):
-                    st.session_state["_vis_forslag_dialog"] = f["kriterium"]
         st.write("")
+        if not navn_liste_jury:
+            st.caption("Ingen jurymedlemmer lagt til ennå.")
+        for navn in navn_liste_jury:
+            mine = jury[navn]["kriterier"]
+            with st.container(border=True):
+                rc1, rc2 = st.columns([4, 1])
+                with rc1:
+                    st.markdown(f"**{navn}**")
+                    if mine:
+                        merkelapper = "".join(
+                            f'<span class="klasse-badge" style="margin:2px 4px 2px 0;border-color:{FAGFELT_FARGE.get(fagfelt, "#888")};">{k}</span>'
+                            for fagfelt, kriterier in felt_dict.items() for k in kriterier if k in mine
+                        )
+                        st.markdown(merkelapper, unsafe_allow_html=True)
+                        st.caption(f"{len(mine)} kriterier")
+                    else:
+                        st.caption("Ingen kriterier tildelt")
+                with rc2:
+                    if st.button("Rediger", key=f"rediger_jury_{navn}", use_container_width=True):
+                        jury_dialog(navn)
 
-    if st.session_state.get("_vis_forslag_dialog"):
-        _valgt_forslag = next((f for f in manglende_forslag if f["kriterium"] == st.session_state["_vis_forslag_dialog"]), None)
-        st.session_state["_vis_forslag_dialog"] = None
-        if _valgt_forslag:
-            kriterium_dialog(forslag=_valgt_forslag)
+    with fane_kriterier:
+        manglende_forslag = manglende_foreslatte_kriterier(alle_kriterier)
+        if manglende_forslag:
+            with st.container(border=True):
+                st.markdown("**Foreslåtte kriterier som ikke er lagt til ennå**")
+                st.caption("Tekst foreslått/godkjent tidligere, men aldri faktisk skrevet inn i dette regnearket – juster gjerne før du lagrer.")
+                for f in manglende_forslag:
+                    fkc1, fkc2 = st.columns([5, 1])
+                    fkc1.markdown(f"**{f['kriterium']}** _({f['fagfelt']})_ — {f['kort']}")
+                    if fkc2.button("Legg til", key=f"legg_til_forslag_{f['kriterium']}", use_container_width=True):
+                        st.session_state["_vis_forslag_dialog"] = f["kriterium"]
+            st.write("")
 
-    if st.button("Legg til kriterium", type="primary", icon=":material/add_circle:"):
-        kriterium_dialog()
-    st.write("")
-    for fagfelt in fagfelt_liste(alle_kriterier) or list(felt_dict.keys()):
-        farge_fagfelt = FAGFELT_FARGE.get(fagfelt, "#888")
-        st.markdown(f"<span style='color:{farge_fagfelt};font-weight:700;'>{fagfelt}</span>", unsafe_allow_html=True)
-        for k in [kk for kk in alle_kriterier if kk["fagfelt"] == fagfelt]:
-            kc1, kc2 = st.columns([5, 1])
-            status_tekst = "✅ Aktiv" if k["aktiv"] else "⏸️ Inaktiv"
-            antall_jm = antall_jury_per_kriterium.get(k["kriterium"], 0)
-            kc1.markdown(f"**{k['kriterium']}** — {k.get('kort', '')}  \n_{status_tekst} · {antall_jm} jurymedlem(mer)_")
-            if kc2.button("Rediger", key=f"rediger_krit_{k['kriterium']}", use_container_width=True):
-                kriterium_dialog(k["kriterium"])
+        if st.session_state.get("_vis_forslag_dialog"):
+            _valgt_forslag = next((f for f in manglende_forslag if f["kriterium"] == st.session_state["_vis_forslag_dialog"]), None)
+            st.session_state["_vis_forslag_dialog"] = None
+            if _valgt_forslag:
+                kriterium_dialog(forslag=_valgt_forslag)
+
+        if st.button("Legg til kriterium", type="primary", icon=":material/add_circle:"):
+            kriterium_dialog()
         st.write("")
+        for fagfelt in fagfelt_liste(alle_kriterier) or list(felt_dict.keys()):
+            farge_fagfelt = FAGFELT_FARGE.get(fagfelt, "#888")
+            st.markdown(f"<span style='color:{farge_fagfelt};font-weight:700;'>{fagfelt}</span>", unsafe_allow_html=True)
+            for k in [kk for kk in alle_kriterier if kk["fagfelt"] == fagfelt]:
+                kc1, kc2 = st.columns([5, 1])
+                status_tekst = "✅ Aktiv" if k["aktiv"] else "⏸️ Inaktiv"
+                antall_jm = antall_jury_per_kriterium.get(k["kriterium"], 0)
+                kc1.markdown(f"**{k['kriterium']}** — {k.get('kort', '')}  \n_{status_tekst} · {antall_jm} jurymedlem(mer)_")
+                if kc2.button("Rediger", key=f"rediger_krit_{k['kriterium']}", use_container_width=True):
+                    kriterium_dialog(k["kriterium"])
+            st.write("")
+
+
+vis_jury_og_kriterier_tabs()
 
 st.divider()
 st.subheader("Fasestatus", anchor=False)

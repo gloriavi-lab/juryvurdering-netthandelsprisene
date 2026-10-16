@@ -175,7 +175,7 @@ def sikre_kriterier_fane(sh):
     return ws
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def read_criteria(_sh):
     """Returnerer ALLE kriterierader (inkl. inaktive – admin-UI trenger dem).
     Hver rad: {fagfelt, kriterium, kort, utfyllende, skala1, skala3, skala5,
@@ -313,7 +313,7 @@ def sikre_jury_fane(sh):
         return ws
 
 
-@st.cache_data(ttl=30, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def read_jury(_sh):
     """{navn: {"epost":, "farge":, "kriterier": set(kriterium-tekst der boksen er avkrysset)}}."""
     ws = sikre_jury_fane(_sh)
@@ -423,7 +423,7 @@ _VEILEDNING_SEED = [
 ]
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def read_veiledning(_sh):
     ws = hent_eller_lag_fane(_sh, VEILEDNING_FANE, VEILEDNING_HEADER)
     if len(ws.get_all_values()) <= 1:
@@ -492,7 +492,7 @@ _TESTKJOP_VEILEDNING_SEED = [
 ]
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def read_testkjop_veiledning(_sh):
     ws = hent_eller_lag_fane(_sh, TESTKJOP_VEILEDNING_FANE, VEILEDNING_HEADER)
     if len(ws.get_all_values()) <= 1:
@@ -552,7 +552,7 @@ def _migrer_gammelt_faser_format(ws):
     ws.update(nye_rader)
 
 
-@st.cache_data(ttl=120, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def read_faser(_sh):
     ws = hent_eller_lag_fane(_sh, FASER_FANE, FASER_HEADER)
     _migrer_gammelt_faser_format(ws)
