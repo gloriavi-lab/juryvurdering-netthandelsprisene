@@ -20,7 +20,8 @@ from sheets import (
     fane_oversikt, feilsok_farget_fane, feilsok_vurdering, finale_las_info, finn_tomme_butikkrader,
     fjern_finale_las, fjern_formatering_fra_rad, flytt_fane_til_forst, konverter_scorer_til_tall, KOMMENTARER_FANE,
     legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, merk_som_arkiv, migrer_orphan_fane,
-    hent_api_kall_logg, migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane, nullstill_vurderinger,
+    hent_api_kall_logg, hent_handling_logg, migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane,
+    nullstill_vurderinger,
     read_fase1_scores, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger,
     sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner, sjekk_gammel_fane_for_orphan_data,
     test_tilkobling, VURDERINGER_FANE,
@@ -100,6 +101,22 @@ st.caption(
     "ALLE som bruker appen samtidig, så loggen viser samlet trafikk for hele appen, ikke bare din egen økt – "
     "fortsatt nyttig for å se hvilke sider/handlinger som faktisk er tregest, i stedet for å gjette."
 )
+
+st.markdown("**Siste 10 handlinger**")
+_handling_logg = hent_handling_logg()
+if not _handling_logg:
+    st.caption("Ingen handlinger målt ennå i denne kjøringen – lagre noe eller bytt side, så dukker de opp her.")
+else:
+    st.dataframe(
+        [
+            {
+                "Tid": h["tid"], "Handling": h["handling"], "Total tid (ms)": h["varighet_ms"],
+                "Antall Sheets-kall": h["antall_kall"], "ms per kall": h["ms_per_kall"],
+            }
+            for h in reversed(_handling_logg)
+        ],
+        hide_index=True, use_container_width=True,
+    )
 _api_logg = hent_api_kall_logg()
 if not _api_logg:
     st.caption("Ingen kall målt ennå i denne kjøringen (nullstilles når appen restarter).")
@@ -697,16 +714,20 @@ except Exception as e:
 if not manglende_omdopinger:
     st.success("Ingen kriterienavn venter på oppdatering.", icon=":material/check_circle:")
 else:
-    for gammelt, (fagfelt, nytt) in manglende_omdopinger.items():
+    for gammelt, (fagfelt, nytt, ny_kort, gammel_kort) in manglende_omdopinger.items():
         with st.container(border=True):
             st.markdown(f"**«{gammelt}»** ({fagfelt}) → **«{nytt}»**")
+            st.caption("Nåværende kort beskrivelse:")
+            st.caption(gammel_kort or "_(tom)_")
+            st.caption("Foreslått kort beskrivelse:")
+            st.markdown(ny_kort)
             st.caption(
-                f"Oppdaterer Kriterier-fanen, kolonneoverskriften i «{FASE2_FANE}» og i «Jury» – "
-                "jurymedlemmer som hadde dette kriteriet beholder det (samme kolonne, nytt navn)."
+                f"Oppdaterer Kriterier-fanen (navn + kort beskrivelse), kolonneoverskriften i «{FASE2_FANE}» og i "
+                "«Jury» – jurymedlemmer som hadde dette kriteriet beholder det (samme kolonne, nytt navn)."
             )
             if st.button(f"Oppdater til «{nytt}»", key=f"omdop_krit_{gammelt}"):
                 try:
-                    res = omdop_kriterium(sh, fagfelt, gammelt, nytt)
+                    res = omdop_kriterium(sh, fagfelt, gammelt, nytt, ny_kort=ny_kort)
                 except Exception as e:
                     vis_feil(f"Kunne ikke omdøpe «{gammelt}»", e)
                 else:

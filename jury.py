@@ -152,20 +152,30 @@ def manglende_kriterium_kolonner(sh, fane_navn, alle_kriterier, fase="Fase 3", g
     return [(k["fagfelt"], k["kriterium"]) for k in aktive if (k["fagfelt"], k["kriterium"]) not in krit_eksisterende]
 
 
-_KRITERIUM_OMDOPINGER = {"E-post": "Kundeklubb, nyhetsbrev, e-post og SMS"}
+_KRITERIUM_OMDOPINGER = {
+    "E-post": {
+        "nytt_navn": "Kundeklubb, nyhetsbrev, e-post og SMS",
+        "ny_kort": "Bruk av kundeklubb, nyhetsbrev, e-post og SMS i kundedialogen.",
+    },
+}
 
 
 def manglende_kriterium_omdopinger(alle_kriterier):
-    """{gammelt_navn: (fagfelt, nytt_navn)} for kriterier som fortsatt heter
-    det gamle, avtalte navnet i det levende arket – fagfeltet LESES fra
-    selve kriteriet (ikke hardkodet), slik at det ikke spiller noen rolle
-    nøyaktig hvordan fagfelt-navnet er stavet i akkurat dette regnearket."""
-    eksisterende = {k["kriterium"]: k["fagfelt"] for k in alle_kriterier}
-    return {
-        gammelt: (eksisterende[gammelt], nytt)
-        for gammelt, nytt in _KRITERIUM_OMDOPINGER.items()
-        if gammelt in eksisterende and nytt not in eksisterende
-    }
+    """{gammelt_navn: (fagfelt, nytt_navn, ny_kort, gammel_kort)} for
+    kriterier som fortsatt heter/beskrives med det gamle, avtalte innholdet
+    i det levende arket – fagfeltet LESES fra selve kriteriet (ikke
+    hardkodet), slik at det ikke spiller noen rolle nøyaktig hvordan
+    fagfelt-navnet er stavet i akkurat dette regnearket."""
+    eksisterende = {k["kriterium"]: k for k in alle_kriterier}
+    resultat = {}
+    for gammelt, info in _KRITERIUM_OMDOPINGER.items():
+        if gammelt not in eksisterende or info["nytt_navn"] in eksisterende:
+            continue
+        k = eksisterende[gammelt]
+        if k["kriterium"] == info["nytt_navn"] and k["kort"] == info["ny_kort"]:
+            continue  # alt er alt oppdatert
+        resultat[gammelt] = (k["fagfelt"], info["nytt_navn"], info["ny_kort"], k["kort"])
+    return resultat
 
 
 def _seed_kriterier_rader():
@@ -269,15 +279,16 @@ def oppdater_kriterium(sh, kriterium_tekst, **felter):
     return False
 
 
-def omdop_kriterium(sh, fagfelt, gammelt_navn, nytt_navn):
-    """Endrer et kriteriums NAVN overalt det brukes – Kriterier-fanens egen
-    rad, kolonneoverskriften i FASE2_FANE («Rangering ekspertvurdering»), og
-    kolonneoverskriften i Jury-fanen – UTEN å røre selve kolonnen/raden
-    (posisjonen bevares), slik at eksisterende scorer, kommentarer og
-    jury-tildelinger følger automatisk med (de er knyttet til CELLEN, ikke
-    navnet). Tar sikkerhetskopi av alt først. Returnerer hva som faktisk ble
-    funnet og endret, slik at admin-UI kan vise det tydelig i stedet for å
-    anta at alle tre stedene fantes."""
+def omdop_kriterium(sh, fagfelt, gammelt_navn, nytt_navn, ny_kort=None):
+    """Endrer et kriteriums NAVN (og valgfritt «Kort beskrivelse») overalt
+    det brukes – Kriterier-fanens egen rad, kolonneoverskriften i
+    FASE2_FANE («Rangering ekspertvurdering»), og kolonneoverskriften i
+    Jury-fanen – UTEN å røre selve kolonnen/raden (posisjonen bevares),
+    slik at eksisterende scorer, kommentarer og jury-tildelinger følger
+    automatisk med (de er knyttet til CELLEN, ikke navnet). Tar
+    sikkerhetskopi av alt først. Returnerer hva som faktisk ble funnet og
+    endret, slik at admin-UI kan vise det tydelig i stedet for å anta at
+    alle stedene fantes."""
     backup_navn = sikkerhetskopier_alle_faner(sh)
     endret = {"kriterier": False, "fase2": False, "jury": False}
 
@@ -286,6 +297,8 @@ def omdop_kriterium(sh, fagfelt, gammelt_navn, nytt_navn):
     for i, rad in enumerate(rader[1:], start=2):
         if len(rad) >= 2 and rad[1] == gammelt_navn:
             ws_krit.update([[nytt_navn]], range_name=f"B{i}")
+            if ny_kort:
+                ws_krit.update([[ny_kort]], range_name=f"C{i}")
             endret["kriterier"] = True
             break
     read_criteria.clear()

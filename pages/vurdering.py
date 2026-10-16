@@ -27,8 +27,8 @@ from jury import (
     read_faser, read_jury,
 )
 from sheets import (
-    read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger, skriv_mange_til_farget_fane,
-    upsert_generell_kommentar, upsert_mange_vurderinger,
+    mal_handling, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger,
+    skriv_mange_til_farget_fane, upsert_generell_kommentar, upsert_mange_vurderinger,
 )
 from theme import FAGFELT_FARGE, STATUS_FARGE, STATUS_TEKST, STATUS_TONE
 
@@ -47,13 +47,14 @@ if not sh:
     st.warning("Google Sheets-tilkoblingen mangler – gå til **Innstillinger**.", icon=":material/cloud_off:")
     st.stop()
 
-try:
-    butikker, _ = read_stores(sh)
-    jury = read_jury(sh)
-    alle_kriterier = read_criteria(sh)
-except Exception as e:
-    vis_feil("Kunne ikke lese regnearket", e)
-    st.stop()
+with mal_handling("Åpne side: Vurdering"):
+    try:
+        butikker, _ = read_stores(sh)
+        jury = read_jury(sh)
+        alle_kriterier = read_criteria(sh)
+    except Exception as e:
+        vis_feil("Kunne ikke lese regnearket", e)
+        st.stop()
 
 # Fase-styrt butikkliste: valgfri «Fase»-kolonne i butikklistens kildefane
 # (se sheets._les_butikkliste) – en butikk skjules KUN hvis den kolonnen
@@ -212,6 +213,15 @@ if not st.session_state.get("_apnet_butikk"):
 
 
 def lagre_denne(navn):
+    """Tynn tidtakings-innpakning rundt _lagre_denne_impl – se den for selve
+    logikken. Måler total medgått tid + antall Sheets-API-kall for HELE
+    lagringen (inkl. bekreftelsen), vist som handlingen «Lagre» i
+    Innstillinger → Ytelse."""
+    with mal_handling("Lagre"):
+        return _lagre_denne_impl(navn)
+
+
+def _lagre_denne_impl(navn):
     """Skriver, og – VIKTIG – leser så de akkurat skrevne cellene TILBAKE fra
     regnearket og sammenligner før "Lagret" vises. En bruker oppdaget at
     appen kunne vise "Lagret" selv om INGENTING faktisk sto i arket (fordi
@@ -516,10 +526,6 @@ def vis_vurderingsvisning():
     if tilstand:
         lagringsstatus(tilstand[0], tilstand[1])
 
-    _neste_navn_tekst = neste_uferdige(navn)
-    if _neste_navn_tekst:
-        st.markdown(f'<div class="vurdering-neste-tekst">Neste: {_neste_navn_tekst}</div>', unsafe_allow_html=True)
-
     # NB: IKKE on_click-callbacks her – Streamlit behandler st.rerun() kalt
     # INNE i en on_click-callback som en no-op (bekreftet empirisk: en
     # tidligere callback-basert variant viste Streamlit sin egen advarsel
@@ -532,51 +538,59 @@ def vis_vurderingsvisning():
     # fragmentet, så en fragment-rerun ville aldri sett det som nettopp ble
     # lagret.
     #
-    # KUN ÉN lagreknapp («Lagre» – lagrer OG åpner neste). «Lukk» og
+    # KUN ÉN lagreknapp («Lagre →» – lagrer OG åpner neste). «Lukk» og
     # «← Forrige» lagrer ALDRI – de spør via _bekreft_forkast() hvis det
-    # finnes ulagrede endringer, ellers navigerer de rett. Fire kolonner i
-    # fast DOM-rekkefølge (forrige, mellomrom, lukk, lagre) – se styles.py
-    # for hvordan @media (max-width:640px) omorganiserer og stabler disse
-    # fire på mobil via nth-child. st.container(key=...) gir den stabile
-    # CSS-klassen "st-key-vurdering_knapperad" å style via. kol_lukk/
-    # kol_lagre har LIK bredde (1.2/1.2) med vilje, slik at Streamlit sin
-    # faste kolonne-avstand blir den eneste, jevne avstanden mellom dem.
+    # finnes ulagrede endringer, ellers navigerer de rett.
+    #
+    # st.container(horizontal=True, horizontal_alignment="distribute") gir
+    # en ekte flex-rad med to barn: «← Forrige» (venstre, kan være tomt) og
+    # en INDRE horisontal container med «Lukk»+«Lagre →» (høyre klynge) –
+    # "distribute" skyver dem til hver sin kant, uavhengig av bredden på
+    # hvert barn (derfor funker det fint selv når venstre barn er tomt).
+    # Styles.py gir ytre container (key="vurdering_knapperad") fast
+    # bunn-posisjon (position:fixed – se forklaring i styles.py for hvorfor
+    # ikke sticky) + skillelinje, og indre klynge (key="vurdering_lagre_lukk")
+    # en eksplisitt, lik avstand mellom knappene. Tom "bunnplass"-div rett
+    # før reserverer plass så den faste linja ikke dekker siste innhold.
+    _neste_navn_tekst = neste_uferdige(navn)
+    st.markdown('<div class="vurdering-bunnplass"></div>', unsafe_allow_html=True)
     with st.container(key="vurdering_knapperad"):
-        kol_forrige, _kol_mellomrom, kol_lukk, kol_lagre = st.columns([1.3, 3, 1.2, 1.2])
-        with kol_forrige:
-            if i > 0 and st.button("← Forrige", type="tertiary"):
-                forrige_navn = navn_liste_butikker[i - 1]
+        with st.container(horizontal=True, horizontal_alignment="distribute", vertical_alignment="center"):
+            with st.container():
+                if i > 0 and st.button("← Forrige", type="tertiary"):
+                    forrige_navn = navn_liste_butikker[i - 1]
 
-                def _ga_forrige(forrige_navn=forrige_navn):
-                    _bytt_til(forrige_navn)
-                    st.session_state["_scroll_til_topp"] = True
-
-                if _har_ulagrede_endringer(navn):
-                    _bekreft_forkast(f"Du har endringer i **{navn}** som ikke er lagret. Gå til forrige butikk likevel?", _ga_forrige)
-                else:
-                    _ga_forrige()
-                    st.rerun()
-        with kol_lukk:
-            if st.button("Lukk"):
-                def _lukk():
-                    st.session_state["_apnet_butikk"] = None
-
-                if _har_ulagrede_endringer(navn):
-                    _bekreft_forkast("Du har endringer som ikke er lagret – lukk likevel?", _lukk)
-                else:
-                    _lukk()
-                    st.rerun()
-        with kol_lagre:
-            if st.button("Lagre", type="primary"):
-                if lagre_denne(navn):
-                    st.session_state["_toast_etter_rerun"] = True
-                    neste = neste_uferdige(navn)
-                    if neste:
-                        _bytt_til(neste)
+                    def _ga_forrige(forrige_navn=forrige_navn):
+                        _bytt_til(forrige_navn)
                         st.session_state["_scroll_til_topp"] = True
+
+                    if _har_ulagrede_endringer(navn):
+                        _bekreft_forkast(f"Du har endringer i **{navn}** som ikke er lagret. Gå til forrige butikk likevel?", _ga_forrige)
                     else:
+                        _ga_forrige()
+                        st.rerun()
+            with st.container(key="vurdering_lagre_lukk", horizontal=True, vertical_alignment="center"):
+                if st.button("Lukk"):
+                    def _lukk():
                         st.session_state["_apnet_butikk"] = None
-                st.rerun()
+
+                    if _har_ulagrede_endringer(navn):
+                        _bekreft_forkast("Du har endringer som ikke er lagret – lukk likevel?", _lukk)
+                    else:
+                        _lukk()
+                        st.rerun()
+                if st.button("Lagre →", type="primary"):
+                    if lagre_denne(navn):
+                        st.session_state["_toast_etter_rerun"] = True
+                        neste = neste_uferdige(navn)
+                        if neste:
+                            _bytt_til(neste)
+                            st.session_state["_scroll_til_topp"] = True
+                        else:
+                            st.session_state["_apnet_butikk"] = None
+                    st.rerun()
+        if _neste_navn_tekst:
+            st.markdown(f'<div class="vurdering-neste-tekst">Neste: {_neste_navn_tekst}</div>', unsafe_allow_html=True)
 
 
 FANE_STATUS = {"gjenstar": "Ikke startet", "pabegynt": "Påbegynt", "ferdig": "Ferdig", "alle": None}

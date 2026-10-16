@@ -177,34 +177,77 @@ div[class*="st-key-butikkrad_ferdig_"] {{ background: rgba(30,142,90,0.06); }}
     div[class*="st-key-butikkrad_"] {{ padding:2px; }}
 }}
 
-/* Handlingsraden i vurderingsskjemaet (← Forrige / Lagre og lukk / Lagre og
-   neste →) – fire kolonner i DOM-rekkefølge (forrige, mellomrom, lukk,
-   neste). nth-child brukes til å omorganisere/stable dem på mobil uten å
-   måtte endre selve Python-koden for layouten. OBS: Streamlit legger et
-   ekstra stLayoutWrapper-nivå mellom containeren og stHorizontalBlock, og
-   hver kolonne sin data-testid er "stColumn" (ikke "column") – bekreftet
-   ved å dumpe faktisk DOM, ikke antatt. */
-.vurdering-neste-tekst {{ font-size:12.5px; color:var(--tekst-dempet); margin-bottom:6px; }}
+/* Handlingsraden i vurderingsskjemaet (← Forrige / Lukk / Lagre →). Bygget
+   med st.container(horizontal=True, horizontal_alignment="distribute") –
+   IKKE st.columns – som gir en ekte flex-rad med to barn: «← Forrige»
+   (kan være tomt) og en INDRE horisontal klynge (key="vurdering_lagre_lukk")
+   med «Lukk»+«Lagre →». "distribute" plasserer de to barna i hver sin kant
+   uavhengig av bredde. DOM bekreftet ved faktisk dump (ikke antatt):
+   st-key-vurdering_lagre_lukk sitter DIREKTE på selve stHorizontalBlock-
+   diven denne gangen (ingen stColumn-mellomlag slik st.columns ga). */
+.vurdering-neste-tekst {{ font-size:12.5px; color:var(--tekst-dempet); text-align:right; margin-top:4px; }}
+
+/* position:sticky testet først, men Streamlit sin egen nøstede flex-/
+   scroll-container-struktur (section[data-testid="stMain"] med overflow:
+   auto, flere mellomliggende stVerticalBlock-nivåer) hindret den i
+   faktisk å feste seg – bekreftet empirisk (computed style viste riktig
+   "position: sticky", men elementet fulgte scrollen 1:1 uansett).
+   position:fixed er mer robust her: den bryr seg ikke om Streamlit sin
+   interne scroll-struktur, bare selve viewporten. */
+div[class*="st-key-vurdering_knapperad"] {{
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 999;
+    background: var(--kort-bakgrunn);
+    border-top: 1px solid var(--kant);
+    padding: 12px clamp(16px, 6vw, 80px) 10px clamp(16px, 6vw, 80px);
+    margin-top: 10px;
+}}
+/* Reserverer plass NEDERST på selve siden, så den faste bunnlinja aldri
+   dekker over kommentarfeltet/siste kriterium – egen klasse satt rundt
+   HELE vurderingsskjemaet (ikke selve knapperad-diven, som jo ER linja). */
+.vurdering-bunnplass {{ height: 92px; }}
+/* "distribute" (justify-content:space-between) virker riktig på selve
+   stHorizontalBlock-diven, MEN Streamlit gir hvert direkte barn (stLayout
+   Wrapper) LIK bredde (en implisitt 50/50-splitt) i stedet for å krympe
+   til faktisk innhold – bekreftet ved å dumpe computed style. Uten denne
+   overstyringen havner «← Forrige»-slottet og Lukk/Lagre-klyngen midt i
+   HVER SIN halvdel i stedet for helt ute i hver sin kant. */
+div[class*="st-key-vurdering_knapperad"] > div[data-testid="stLayoutWrapper"] > div[data-testid="stHorizontalBlock"] > div[data-testid="stLayoutWrapper"] {{
+    flex: 0 0 auto !important;
+    width: auto !important;
+}}
+div[class*="st-key-vurdering_lagre_lukk"] {{
+    gap: 10px !important;
+}}
+div[class*="st-key-vurdering_knapperad"] button {{
+    min-height: 44px;
+}}
+
 @media (max-width: 640px) {{
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] {{
-        flex-direction: column;
-        gap: 8px;
+    /* Ytre rad (forrige-slot + lukk/lagre-klynge): column-reverse viser
+       SISTE DOM-barn (klyngen) øverst og FØRSTE (← Forrige) nederst – uten
+       å trenge noen egen order-logikk. */
+    div[class*="st-key-vurdering_knapperad"] > div[data-testid="stLayoutWrapper"] > div[data-testid="stHorizontalBlock"] {{
+        flex-direction: column-reverse;
+        align-items: stretch !important;
+        gap: 10px;
     }}
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] {{
+    div[class*="st-key-vurdering_knapperad"] > div[data-testid="stLayoutWrapper"] > div[data-testid="stHorizontalBlock"] > div[data-testid="stLayoutWrapper"]:first-child {{
+        text-align: center;
+    }}
+    /* Indre klynge (Lukk, Lagre →): samme column-reverse-triks, slik at
+       «Lagre →» (siste DOM-barn) havner øverst og «Lukk» under. */
+    div[class*="st-key-vurdering_lagre_lukk"] {{
+        flex-direction: column-reverse !important;
+        width: 100%;
+    }}
+    div[class*="st-key-vurdering_lagre_lukk"] div[data-testid="stElementContainer"] {{
         width: 100% !important;
-        flex: 1 1 100% !important;
-        min-width: 100% !important;
     }}
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(1) {{ order: 3; text-align:center; }}
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(2) {{ display: none; }}
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(3) {{ order: 2; }}
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) {{ order: 1; }}
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(3) div[data-testid="stElementContainer"],
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) div[data-testid="stElementContainer"],
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(3) div[data-testid="stButton"],
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) div[data-testid="stButton"],
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(3) button,
-    div[class*="st-key-vurdering_knapperad"] div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"]:nth-child(4) button {{
+    div[class*="st-key-vurdering_lagre_lukk"] button {{
         width: 100% !important;
     }}
 }}

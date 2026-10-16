@@ -10,7 +10,7 @@ import streamlit as st
 from components import regneark_tabell, topptekst, vis_feil
 from data import er_tall, grupper_vurderinger, normalize_score, status_for_scorer
 from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
-from sheets import read_ratings, read_stores, read_vurderinger
+from sheets import mal_handling, read_ratings, read_stores, read_vurderinger
 from theme import FAGFELT_FARGE, KLASSE_IKON, KLASSE_TONE
 
 topptekst("Butikker")
@@ -20,15 +20,16 @@ if not sh:
     st.warning("Google Sheets-tilkoblingen mangler – gå til **Innstillinger**.", icon=":material/cloud_off:")
     st.stop()
 
-try:
-    butikker, _ = read_stores(sh)
-    alle_vurderinger = read_vurderinger(sh)
-    fargede_fane_data = read_ratings(sh)
-    jury = read_jury(sh)
-    kriterier_fase3 = aktive_kriterier(read_criteria(sh), fase="Fase 3")
-except Exception as e:
-    vis_feil("Kunne ikke lese regnearket", e)
-    st.stop()
+with mal_handling("Bytt side: Butikker"):
+    try:
+        butikker, _ = read_stores(sh)
+        alle_vurderinger = read_vurderinger(sh)
+        fargede_fane_data = read_ratings(sh)
+        jury = read_jury(sh)
+        kriterier_fase3 = aktive_kriterier(read_criteria(sh), fase="Fase 3")
+    except Exception as e:
+        vis_feil("Kunne ikke lese regnearket", e)
+        st.stop()
 
 FAGFELT = fagfelt_liste(kriterier_fase3)
 KRITERIER_PER_FAGFELT = kriterier_per_fagfelt(kriterier_fase3)

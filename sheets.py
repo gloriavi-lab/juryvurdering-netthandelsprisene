@@ -43,6 +43,7 @@ aldri radnummer) når den skriver til en eksisterende fane.
 import re
 import time
 from collections import deque
+from contextlib import contextmanager
 
 import gspread
 import streamlit as st
@@ -101,6 +102,37 @@ def hent_api_kall_logg():
     """Kopi av de siste (maks 500) målte Sheets-API-kallene, nyeste sist –
     til bruk i Innstillinger → Ytelse. Rører ikke selve loggen."""
     return list(_API_KALL_LOGG)
+
+
+# Handlingsnivå (i stedet for enkelt-API-kall) – «Lagre», «Åpne side: X» osv.
+# Måler total medgått tid OG hvor mange av de ferske API-kallene (loggen
+# over) som skjedde underveis, slik at «X sekunder, Y kall» kan vises
+# samlet i Innstillinger uten å måtte lese den rå API-loggen selv.
+_HANDLING_LOGG = deque(maxlen=10)
+
+
+@contextmanager
+def mal_handling(navn):
+    start = time.monotonic()
+    antall_for = len(_API_KALL_LOGG)
+    try:
+        yield
+    finally:
+        varighet_ms = (time.monotonic() - start) * 1000
+        antall_kall = len(_API_KALL_LOGG) - antall_for
+        _HANDLING_LOGG.append({
+            "handling": navn,
+            "tid": naa_norsk().strftime("%H:%M:%S"),
+            "varighet_ms": round(varighet_ms, 1),
+            "antall_kall": antall_kall,
+            "ms_per_kall": round(varighet_ms / antall_kall, 1) if antall_kall else 0,
+        })
+
+
+def hent_handling_logg():
+    """Kopi av de siste (maks 10) målte HANDLINGENE («Lagre», «Åpne side:
+    ...»), nyeste sist – til bruk i Innstillinger → Ytelse."""
+    return list(_HANDLING_LOGG)
 
 
 @st.cache_resource(ttl=3600, show_spinner=False)
@@ -336,6 +368,47 @@ def legg_til_kriterium_kolonne(sh, fane_navn, fagfelt, nytt_kriterium):
     ws.update([[nytt_kriterium]], range_name=gspread.utils.rowcol_to_a1(2, ny_kolonne))
     _header_data.clear()
     _rå_formatert.clear()
+
+    # «Snitt totalt»-formelen i hver rad er RÅ TEKST i arket (satt opp
+    # manuelt en gang, ikke av appen) – Sheets justerer VANLIGVIS
+    # formelreferanser automatisk når en kolonne settes inn midt i et
+    # referert område, men oppførselen ved innsetting HELT I KANTEN av
+    # området (som her – ny kriterium-kolonne rett før/etter den gamle
+    # siste) er usikker/implementasjonsavhengig. Skriver derfor formelen
+    # eksplisitt på nytt for å GARANTERE at den dekker alle kriteriene,
+    # i stedet for å stole på at Sheets utvider den selv.
+    if SNITT_KOLONNE_NAVN in grunn:
+        oppdater_snitt_totalt_formler(sh, fane_navn)
+
+
+def oppdater_snitt_totalt_formler(sh, fane_navn):
+    """Skriver «Snitt totalt»-formelen på nytt for alle butikkrader, slik at
+    den garantert dekker fra FØRSTE til SISTE kriteriekolonne som faktisk
+    finnes nå (se legg_til_kriterium_kolonne for hvorfor). Samme stil som
+    originalen i arket: =IFERROR(AVERAGE(<første><rad>:<siste><rad>);"")."""
+    ws = sh.worksheet(fane_navn)
+    grunn, krit, _ = _header_data(ws, grunnkolonner=GRUNNKOLONNER + [SNITT_KOLONNE_NAVN] + EKSTRA_KOLONNER)
+    kol_snitt = grunn.get(SNITT_KOLONNE_NAVN)
+    kol_butikk = grunn.get("Butikk")
+    if not kol_snitt or not krit or not kol_butikk:
+        return {"antall": 0}
+    bokstav_forste = gspread.utils.rowcol_to_a1(1, min(krit.values())).rstrip("0123456789")
+    bokstav_siste = gspread.utils.rowcol_to_a1(1, max(krit.values())).rstrip("0123456789")
+
+    rader = ws.get_all_values()
+    oppdateringer = []
+    for r in range(FORSTE_DATARAD, len(rader) + 1):
+        rad = rader[r - 1]
+        navn = rad[kol_butikk - 1].strip() if len(rad) >= kol_butikk else ""
+        if not navn:
+            continue
+        formel = f'=IFERROR(AVERAGE({bokstav_forste}{r}:{bokstav_siste}{r});"")'
+        oppdateringer.append({"range": gspread.utils.rowcol_to_a1(r, kol_snitt), "values": [[formel]]})
+    if oppdateringer:
+        ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
+    _rå_formatert.clear()
+    read_ratings.clear()
+    return {"antall": len(oppdateringer)}
 
 
 def _sikre_fase2_fane(sh):
