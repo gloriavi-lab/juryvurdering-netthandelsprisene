@@ -136,6 +136,22 @@ def finn_duplisert_kriterium(alle_kriterier, kriterium_navn):
     )
 
 
+def manglende_kriterium_kolonner(sh, fane_navn, alle_kriterier, fase="Fase 3", grunnkolonner=None):
+    """Aktive kriterier (i gitt fase) som IKKE har en tilsvarende kolonne i
+    den gitte fanen ennå – oppdager/reparerer tilfeller der et kriterium
+    ble lagt til i Kriterier-fanen (og kanskje i Rangering ekspertvurdering),
+    men IKKE i Jury-fanen (reell bug: write_jury() skriver kun til kolonner
+    som faktisk finnes, så en avkrysning for et slikt kriterium ble stille
+    forkastet uten feilmelding – se Innstillinger)."""
+    aktive = aktive_kriterier(alle_kriterier, fase=fase)
+    try:
+        ws = sh.worksheet(fane_navn)
+    except gspread.WorksheetNotFound:
+        return [(k["fagfelt"], k["kriterium"]) for k in aktive]
+    _, krit_eksisterende, _ = _header_data(ws, grunnkolonner=grunnkolonner)
+    return [(k["fagfelt"], k["kriterium"]) for k in aktive if (k["fagfelt"], k["kriterium"]) not in krit_eksisterende]
+
+
 _KRITERIUM_OMDOPINGER = {"E-post": "Kundeklubb, nyhetsbrev, e-post og SMS"}
 
 

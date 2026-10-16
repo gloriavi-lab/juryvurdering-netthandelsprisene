@@ -278,31 +278,64 @@ def _hex_til_rgb(hex_farge: str) -> dict:
 
 def legg_til_kriterium_kolonne(sh, fane_navn, fagfelt, nytt_kriterium):
     """Setter inn ÉN ny, tom kolonne for et nytt kriterium rett etter siste
-    eksisterende kolonne i riktig fagfeltgruppe i en Rangering-fane.
+    eksisterende kolonne i riktig fagfeltgruppe i en Rangering-/Jury-fane.
     insertDimension(inheritFromBefore=True) kopierer formatering OG
-    datavalidering fra nabokolonnen automatisk – ingen andre celler berøres,
-    og alt annet skyves bare til høyre (ingen data går tapt).
+    datavalidering fra nabokolonnen automatisk. I TILLEGG (lagt til etter at
+    en reell bug ble oppdaget – fagfeltoverskriften i rad 1 ble IKKE utvidet
+    automatisk, og ny kolonne fikk standard kolonnebredde i stedet for å
+    matche naboene): slår eksplisitt sammen rad 1 på nytt over HELE
+    fagfeltgruppen (inkl. den nye kolonnen), og kopierer kolonnebredden fra
+    nabokolonnen. Ingen andre celler berøres, og alt annet skyves bare til
+    høyre (ingen data går tapt).
 
     Dette er det ENESTE stedet appen endrer struktur/formatering i en
-    Rangering-fane – skal KUN kalles etter eksplisitt bekreftelse fra
-    brukeren (st.dialog), se pages/innstillinger.py. IKKE testet mot et
-    ekte regneark ennå – vær forsiktig første gang, og sjekk resultatet i
-    Sheets rett etterpå."""
+    Rangering-/Jury-fane – skal KUN kalles etter eksplisitt bekreftelse fra
+    brukeren (st.dialog), se pages/innstillinger.py."""
     ws = _fane(sh, fane_navn)
     grunn, krit, siste = _header_data(ws)
     kolonner_i_gruppe = sorted(kol for (f, k), kol in krit.items() if f == fagfelt)
     if not kolonner_i_gruppe:
         raise ValueError(f"Fant ingen eksisterende kolonner for fagfeltet «{fagfelt}» i «{fane_navn}» å kopiere format fra.")
+    forste_i_gruppe = min(kolonner_i_gruppe)  # 1-indeksert
     siste_i_gruppe = max(kolonner_i_gruppe)  # 1-indeksert
+    ny_kolonne = siste_i_gruppe + 1
 
-    ws.spreadsheet.batch_update({"requests": [{
-        "insertDimension": {
-            "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": siste_i_gruppe, "endIndex": siste_i_gruppe + 1},
-            "inheritFromBefore": True,
-        }
-    }]})
-    ws.update([[nytt_kriterium]], range_name=gspread.utils.rowcol_to_a1(2, siste_i_gruppe + 1))
+    try:
+        meta = sh.fetch_sheet_metadata(params={
+            "ranges": [f"'{fane_navn}'!{gspread.utils.rowcol_to_a1(1, siste_i_gruppe)}"],
+            "fields": "sheets.data.columnMetadata",
+            "includeGridData": "true",
+        })
+        bredde = meta["sheets"][0]["data"][0]["columnMetadata"][0].get("pixelSize")
+    except Exception:
+        bredde = None
+
+    requests = [
+        {
+            "insertDimension": {
+                "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": siste_i_gruppe, "endIndex": ny_kolonne},
+                "inheritFromBefore": True,
+            }
+        },
+        {
+            "mergeCells": {
+                "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": forste_i_gruppe - 1, "endColumnIndex": ny_kolonne},
+                "mergeType": "MERGE_ALL",
+            }
+        },
+    ]
+    if bredde:
+        requests.append({
+            "updateDimensionProperties": {
+                "range": {"sheetId": ws.id, "dimension": "COLUMNS", "startIndex": siste_i_gruppe, "endIndex": ny_kolonne},
+                "properties": {"pixelSize": bredde},
+                "fields": "pixelSize",
+            }
+        })
+    ws.spreadsheet.batch_update({"requests": requests})
+    ws.update([[nytt_kriterium]], range_name=gspread.utils.rowcol_to_a1(2, ny_kolonne))
     _header_data.clear()
+    _rå_formatert.clear()
 
 
 def _sikre_fase2_fane(sh):

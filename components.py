@@ -1,13 +1,37 @@
 """Gjenbrukbare UI-byggeklosser, slik at hver side slipper å style ting selv."""
 
 import re
+import subprocess
+from datetime import datetime
 
 import pandas as pd
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder, JsCode
 
-from data import er_tall
+from data import OSLO, er_tall
 from theme import FAGFELT_FARGE
+
+
+def hent_versjonsinfo():
+    """Henter commit-hash og tidspunkt for koden som FAKTISK kjører – via
+    git i appens egen mappe (Streamlit Cloud kloner fra GitHub-repoet, så
+    .git ligger normalt med). Brukt i Innstillinger til å bekrefte hvilken
+    versjon som er deployet – flere runder denne sesjonen har endt med at
+    brukeren så gamle endringer og trodde de ikke var publisert, når det
+    egentlig var at Streamlit Cloud ikke hadde bygget på nytt ennå.
+    Returnerer (kort_hash, tidspunkt_norsk_tid) eller (None, None) hvis git
+    ikke er tilgjengelig av en eller annen grunn."""
+    try:
+        hash_kort = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, timeout=5, check=True,
+        ).stdout.strip()
+        tidspunkt_raw = subprocess.run(
+            ["git", "log", "-1", "--format=%cI"], capture_output=True, text=True, timeout=5, check=True,
+        ).stdout.strip()
+        tidspunkt = datetime.fromisoformat(tidspunkt_raw).astimezone(OSLO).strftime("%d.%m.%Y %H:%M")
+        return hash_kort, tidspunkt
+    except Exception:
+        return None, None
 
 
 def feilmelding_tekst(melding: str, e: Exception) -> str:

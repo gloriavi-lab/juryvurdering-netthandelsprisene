@@ -7,10 +7,11 @@ from collections import defaultdict
 
 import streamlit as st
 
-from components import status_prikk, topptekst, vis_feil
+from components import hent_versjonsinfo, status_prikk, topptekst, vis_feil
 from jury import (
     add_criterion, aktive_kriterier, aktiv_fase, deaktiver_kriterium, fagfelt_liste, finn_duplisert_kriterium,
-    kriterier_per_fagfelt, manglende_foreslatte_kriterier, manglende_kriterium_omdopinger,
+    JURY_FANE, kriterier_per_fagfelt, manglende_foreslatte_kriterier, manglende_kriterium_kolonner,
+    manglende_kriterium_omdopinger,
     manglende_veiledning_oppdateringer, mine_kriterier, omdop_kriterium, oppdater_kriterium, oppdater_veiledning_rad,
     read_criteria, read_faser, read_jury, sett_gjeldende_fase, slett_jurymedlem, write_jury,
 )
@@ -739,6 +740,70 @@ if _dup_uu:
                 st.rerun()
 
 st.divider()
+st.subheader("Manglende kolonner for kriterier", anchor=False)
+st.caption(
+    "Oppdager kriterier som finnes i «Kriterier»-fanen, men IKKE har fått en tilsvarende kolonne i «"
+    f"{FASE2_FANE}» og/eller «{JURY_FANE}» ennå – typisk fordi «Sett også inn ny kolonne»-avkrysningen ikke ble "
+    "brukt, eller (en reell feil som er rettet nå) fordi Jury-kolonnen manglet selv om «Sett inn kolonne» ble "
+    "krysset av. Uten en kolonne i «{JURY_FANE}» blir IKKE kriteriet lagret når du krysser det av på et "
+    "jurymedlem – avkrysningen forsvinner stille.".format(JURY_FANE=JURY_FANE)
+)
+try:
+    _mangler_fase2 = manglende_kriterium_kolonner(sh, FASE2_FANE, alle_kriterier)
+    _mangler_jury = manglende_kriterium_kolonner(sh, JURY_FANE, alle_kriterier, grunnkolonner=["Navn", "E-post", "Farge"])
+except Exception as e:
+    _mangler_fase2, _mangler_jury = [], []
+    vis_feil("Kunne ikke sjekke manglende kolonner", e)
+
+if not _mangler_fase2 and not _mangler_jury:
+    st.success("Alle aktive Fase 3-kriterier har kolonne i både «{}» og «{}».".format(FASE2_FANE, JURY_FANE), icon=":material/check_circle:")
+else:
+    if _mangler_fase2:
+        st.warning(f"Mangler kolonne i «{FASE2_FANE}»: " + ", ".join(f"«{k}» ({f})" for f, k in _mangler_fase2), icon=":material/warning:")
+    if _mangler_jury:
+        st.warning(f"Mangler kolonne i «{JURY_FANE}»: " + ", ".join(f"«{k}» ({f})" for f, k in _mangler_jury), icon=":material/warning:")
+    if st.button("Legg til de manglende kolonnene nå", icon=":material/add_box:"):
+        st.session_state["_vis_manglende_kolonner_dialog"] = True
+
+
+@st.dialog("Legge til manglende kolonner?")
+def manglende_kolonner_dialog(mangler_fase2, mangler_jury):
+    st.write(f"Setter inn én kolonne per manglende kriterium i «{FASE2_FANE}» og/eller «{JURY_FANE}», med samme farge/stil/bredde/nedtrekksliste som nabokolonnen. Sikkerhetskopi tas først.")
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True, key="avbryt_manglende_kolonner"):
+        st.rerun()
+    if c2.button("Ja, legg til nå", type="primary", use_container_width=True, icon=":material/add_box:", key="bekreft_manglende_kolonner"):
+        feilet = []
+        with st.spinner("Sikkerhetskopierer og legger til kolonner …"):
+            backup_navn = sikkerhetskopier_alle_faner(sh)
+            for fagfelt, kriterium in mangler_fase2:
+                try:
+                    legg_til_kriterium_kolonne(sh, FASE2_FANE, fagfelt, kriterium)
+                except Exception as e:
+                    feilet.append(f"«{kriterium}» i «{FASE2_FANE}»: {e}")
+            for fagfelt, kriterium in mangler_jury:
+                try:
+                    legg_til_kriterium_kolonne(sh, JURY_FANE, fagfelt, kriterium)
+                except Exception as e:
+                    feilet.append(f"«{kriterium}» i «{JURY_FANE}»: {e}")
+        st.session_state["_manglende_kolonner_resultat"] = {"backup": backup_navn, "feilet": feilet, "antall": len(mangler_fase2) + len(mangler_jury) - len(feilet)}
+        st.rerun()
+
+
+if st.session_state.get("_vis_manglende_kolonner_dialog"):
+    st.session_state["_vis_manglende_kolonner_dialog"] = False
+    manglende_kolonner_dialog(_mangler_fase2, _mangler_jury)
+
+if st.session_state.get("_manglende_kolonner_resultat"):
+    r = st.session_state.pop("_manglende_kolonner_resultat")
+    st.success(f"Ferdig! {r['antall']} kolonne(r) lagt til.", icon=":material/check_circle:")
+    st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
+    if r["feilet"]:
+        with st.expander(f"{len(r['feilet'])} feilet"):
+            for feil in r["feilet"]:
+                st.markdown(f"- {feil}")
+
+st.divider()
 st.subheader("Feilsøking lagring", anchor=False)
 st.caption(
     f"Slår opp nøyaktig det appen leser for ÉN butikk + ETT jurymedlem, i BÅDE den fargede fanen (det som "
@@ -951,6 +1016,13 @@ def kriterium_dialog(redigerer_kriterium=None, forslag=None):
                             legg_til_kriterium_kolonne(sh, FASE1_FANE, fagfelt_sel, navn_sel.strip())
                         if "Fase 3" in faser_sel:
                             legg_til_kriterium_kolonne(sh, FASE2_FANE, fagfelt_sel, navn_sel.strip())
+                            # VIKTIG (reell bug funnet): uten denne fikk det nye
+                            # kriteriet ALDRI en kolonne i Jury-fanen – jury_dialog
+                            # sine avkrysningsbokser bygges fra Kriterier-fanen
+                            # (viste seg derfor fint), men write_jury() skriver KUN
+                            # til kolonner som FAKTISK finnes i selve Jury-fanen, så
+                            # avkrysningen ble stille forkastet uten feilmelding.
+                            legg_til_kriterium_kolonne(sh, JURY_FANE, fagfelt_sel, navn_sel.strip())
                 st.toast("Lagret", icon=":material/check_circle:")
                 st.rerun()
             except Exception as e:
@@ -1092,3 +1164,10 @@ if _finale_last:
             st.rerun()
 else:
     st.caption("Finalelista er ikke låst – rangeringen på Finale-siden oppdateres live. Lås den fra Finale-siden når resultatet er klart.")
+
+st.divider()
+_commit_hash, _commit_tid = hent_versjonsinfo()
+if _commit_hash:
+    st.caption(f"Kjørende versjon: commit `{_commit_hash}` · {_commit_tid} (norsk tid)")
+else:
+    st.caption("Kjørende versjon: ukjent (fant ikke git-informasjon i denne kjøringen).")
