@@ -312,8 +312,8 @@ def omdop_kriterium(sh, fagfelt, gammelt_navn, nytt_navn, ny_kort=None):
             endret["fase2"] = True
     except gspread.WorksheetNotFound:
         pass
-    _header_data.clear()
-    _rå_formatert.clear()
+    _header_data_cached.clear()
+    _rå_formatert_cached.clear()
     read_ratings.clear()
 
     ws_jury = sikre_jury_fane(sh)
@@ -322,7 +322,7 @@ def omdop_kriterium(sh, fagfelt, gammelt_navn, nytt_navn, ny_kort=None):
     if kolonne_jury:
         ws_jury.update([[nytt_navn]], range_name=gspread.utils.rowcol_to_a1(2, kolonne_jury))
         endret["jury"] = True
-    _header_data.clear()
+    _header_data_cached.clear()
     read_jury.clear()
 
     return {"backup": backup_navn, "endret": endret}

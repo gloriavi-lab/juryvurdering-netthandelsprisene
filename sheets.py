@@ -162,12 +162,13 @@ def koble_sheets():
 # ─────────────────────────────────────────────
 # Header-oppslag – ALDRI faste kolonnebokstaver
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=60, show_spinner=False)
-def _header_data(_ws, grunnkolonner=None):
-    """Leser rad 1+2 (med combine_merged_cells slik at en sammenslått
-    gruppeoverskrift gjentas i hver kolonne den dekker) og bygger kolonne-
-    oppslag for grunnkolonner og (fagfelt, kriterium)-par. Forward-fyller i
-    tillegg manuelt som ekstra sikkerhet, i tilfelle en sammenslåing mangler.
+def _header_data_beregn(ws, grunnkolonner=None):
+    """Selve beregningen, UTEN mellomlagring – se _header_data() under for
+    hvorfor dette er splittet ut. Leser rad 1+2 (med combine_merged_cells
+    slik at en sammenslått gruppeoverskrift gjentas i hver kolonne den
+    dekker) og bygger kolonne-oppslag for grunnkolonner og (fagfelt,
+    kriterium)-par. Forward-fyller i tillegg manuelt som ekstra sikkerhet,
+    i tilfelle en sammenslåing mangler.
 
     grunnkolonner er konfigurerbar (ikke bare Rangering-fanenes faste liste)
     siden samme funksjon nå også brukes for Jury-fanen (Navn/E-post/Farge).
@@ -176,7 +177,7 @@ def _header_data(_ws, grunnkolonner=None):
     avhengig av en hardkodet liste med fagfeltnavn, siden Kriterier-fanen nå
     er den egentlige kilden til hvilke fagfelt som finnes."""
     grunnkolonner = grunnkolonner if grunnkolonner is not None else GRUNNKOLONNER + [SNITT_KOLONNE_NAVN]
-    rader = _ws.get("A1:ZZ2", combine_merged_cells=True)
+    rader = ws.get("A1:ZZ2", combine_merged_cells=True)
     rad1 = rader[0] if len(rader) > 0 else []
     rad2 = rader[1] if len(rader) > 1 else []
 
@@ -203,6 +204,32 @@ def _header_data(_ws, grunnkolonner=None):
     return grunnkolonne_indeks, kriterium_indeks, siste_kolonne
 
 
+@st.cache_data(ttl=60, show_spinner=False)
+def _header_data_cached(_ws, fane_nokkel, grunnkolonner=None):
+    return _header_data_beregn(_ws, grunnkolonner)
+
+
+def _header_data(_ws, grunnkolonner=None):
+    """Mellomlagret wrapper rundt _header_data_beregn() – IKKE slå sammen
+    disse to igjen. Sender med fanens EGEN identitet (regneark-ID + fanenavn)
+    som en eksplisitt, HASHBAR del av cache-nøkkelen (fane_nokkel, uten
+    understrek – deltar derfor i hashingen, i motsetning til _ws).
+
+    REELL BUG funnet i produksjon og rettet her: Streamlit ekskluderer _ws
+    fra hashingen (det er HELE POENGET med understreksnavnet – selve
+    gspread-objektet er ikke hashbart) – UTEN fane_nokkel-tillegget ble
+    derfor ALLE kall til denne funksjonen behandlet som IDENTISKE, uansett
+    hvilken fane som faktisk ble sendt inn. Et _header_data(FASE2_FANE)-kall
+    kunne dermed treffe en cachet verdi fra et tidligere _header_data
+    (FASE1_FANE)-kall (gjort av en HELT ANNEN bruker/side) – og siden
+    «Rangering juryvurdering» (FASE1) har én ekstra kolonne («Jurymedlem»)
+    som «Rangering ekspertvurdering» (FASE2) mangler, er ALLE kolonner
+    forskjøvet én plass mellom de to fanene. Dette skrev en kriterietekst
+    inn i FEIL kolonne under en omdøping i produksjon (se git-historikk)."""
+    fane_nokkel = f"{getattr(_ws.spreadsheet, 'id', '?')}:{_ws.title}"
+    return _header_data_cached(_ws, fane_nokkel, grunnkolonner)
+
+
 def _sikre_ekstra_kolonner(ws, grunnkolonne_indeks, siste_kolonne):
     """Legger til kommentarkolonner per fagfelt + «Sist endret»/«Endret av»
     helt til høyre HVIS de ikke finnes fra før – foreslått til bruker, ikke
@@ -213,7 +240,7 @@ def _sikre_ekstra_kolonner(ws, grunnkolonne_indeks, siste_kolonne):
     bokstav = gspread.utils.rowcol_to_a1(1, ny_kolonne_1).rstrip("1")
     bokstav_slutt = gspread.utils.rowcol_to_a1(1, ny_kolonne_1 + len(EKSTRA_KOLONNER) - 1).rstrip("1")
     ws.update([EKSTRA_KOLONNER], range_name=f"{bokstav}1:{bokstav_slutt}1")
-    _header_data.clear()
+    _header_data_cached.clear()
     for i, navn in enumerate(EKSTRA_KOLONNER):
         grunnkolonne_indeks[navn] = ny_kolonne_1 + i
     return grunnkolonne_indeks, ny_kolonne_1 + len(EKSTRA_KOLONNER) - 1
@@ -299,7 +326,7 @@ def _bygg_gruppert_header(sh, fane_navn, grunnkolonner, kriterier_per_fagfelt_di
 
     ws.spreadsheet.batch_update({"requests": merge_forespørsler + formater})
     ws.freeze(rows=2, cols=len(grunnkolonner))
-    _header_data.clear()
+    _header_data_cached.clear()
     return ws
 
 
@@ -366,8 +393,8 @@ def legg_til_kriterium_kolonne(sh, fane_navn, fagfelt, nytt_kriterium):
         })
     ws.spreadsheet.batch_update({"requests": requests})
     ws.update([[nytt_kriterium]], range_name=gspread.utils.rowcol_to_a1(2, ny_kolonne))
-    _header_data.clear()
-    _rå_formatert.clear()
+    _header_data_cached.clear()
+    _rå_formatert_cached.clear()
 
     # «Snitt totalt»-formelen i hver rad er RÅ TEKST i arket (satt opp
     # manuelt en gang, ikke av appen) – Sheets justerer VANLIGVIS
@@ -406,7 +433,7 @@ def oppdater_snitt_totalt_formler(sh, fane_navn):
         oppdateringer.append({"range": gspread.utils.rowcol_to_a1(r, kol_snitt), "values": [[formel]]})
     if oppdateringer:
         ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
-    _rå_formatert.clear()
+    _rå_formatert_cached.clear()
     read_ratings.clear()
     return {"antall": len(oppdateringer)}
 
@@ -421,7 +448,7 @@ def _sikre_fase2_fane(sh):
     except gspread.WorksheetNotFound:
         fase1 = sh.worksheet(FASE1_FANE)
         ny = sh.duplicate_sheet(fase1.id, new_sheet_name=FASE2_FANE)
-        grunn, krit, siste = _header_data.__wrapped__(ny)
+        grunn, krit, siste = _header_data_beregn(ny)
         antall_rader = len(ny.get_all_values())
         if antall_rader >= FORSTE_DATARAD and krit:
             forste_krit_kol = min(c for c in krit.values())
@@ -466,16 +493,33 @@ def legg_til_na_i_datavalidering(sh):
 # ─────────────────────────────────────────────
 # Lesing
 # ─────────────────────────────────────────────
+def _fane_nokkel(ws):
+    """Hashbar identitet for en worksheet (regneark-ID + fanenavn) – brukes
+    som en EKSPLISITT del av cache-nøkkelen for funksjoner som ellers kun
+    tar inn en understreks-prefikset (dermed uhashet) ws-parameter. Se
+    _header_data() for den fulle forklaringen på HVORFOR dette trengs –
+    samme reelle produksjonsbug gjaldt også _rå_formatert/_rå_formel her."""
+    return f"{getattr(ws.spreadsheet, 'id', '?')}:{ws.title}"
+
+
 @st.cache_data(ttl=60, show_spinner=False)
-def _rå_formatert(_ws):
+def _rå_formatert_cached(_ws, fane_nokkel):
     return _ws.get_all_values(combine_merged_cells=True)
 
 
+def _rå_formatert(_ws):
+    return _rå_formatert_cached(_ws, _fane_nokkel(_ws))
+
+
 @st.cache_data(ttl=60, show_spinner=False)
-def _rå_formel(_ws):
+def _rå_formel_cached(_ws, fane_nokkel):
     """Kun brukt til å hente URL ut av =HYPERLINK(...)-formler – alt annet
     (tall, tekst) ser identisk ut i FORMULA-modus som i formatert modus."""
     return _ws.get_all_values(value_render_option="FORMULA", combine_merged_cells=True)
+
+
+def _rå_formel(_ws):
+    return _rå_formel_cached(_ws, _fane_nokkel(_ws))
 
 
 def _uthent_url(formel_verdi):
@@ -619,7 +663,7 @@ def upsert_rating(sh, butikk_navn, jurymedlem, fagfelt, vurderinger, kommentar="
 
     if oppdateringer:
         ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
-    _rå_formatert.clear()
+    _rå_formatert_cached.clear()
     read_ratings.clear()
 
 
@@ -663,7 +707,7 @@ def skriv_mange_til_farget_fane(sh, butikk, verdier_og_notater: list):
             ws.update_notes(notater)
     except Exception:
         pass  # notatet er kun en bekvemmelighet – skal aldri blokkere selve scoren
-    _rå_formatert.clear()  # read_ratings/_les_butikkliste leser via denne – MÅ tømmes, ikke bare read_ratings sin egen cache
+    _rå_formatert_cached.clear()  # read_ratings/_les_butikkliste leser via denne – MÅ tømmes, ikke bare read_ratings sin egen cache
     read_ratings.clear()
     return celler
 
@@ -1408,7 +1452,7 @@ def konverter_scorer_til_tall(sh):
                     oppdateringer.append({"range": gspread.utils.rowcol_to_a1(r, kol), "values": [[verdi]]})
     if oppdateringer:
         ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
-    _rå_formatert.clear()
+    _rå_formatert_cached.clear()
     read_ratings.clear()
 
     ws2 = _sikre_enkel_fane_med_header(sh, VURDERINGER_FANE, VURDERINGER_HEADER2)
@@ -1474,7 +1518,7 @@ def nullstill_vurderinger(sh):
                 resultat["fase2_notater"] = len(notat_celler)
             except Exception:
                 pass  # notater er en bekvemmelighet – skal aldri blokkere selve nullstillingen
-        _rå_formatert.clear()
+        _rå_formatert_cached.clear()
         read_ratings.clear()
 
     for fane_navn, nokkel in [(VURDERINGER_FANE, "vurderinger_rader"), (GENERELLE_KOMMENTARER_FANE, "generelle_rader")]:
@@ -1518,7 +1562,7 @@ def fjern_formatering_fra_rad(sh, fane_navn, fra_rad):
             }
         }]
     })
-    _rå_formatert.clear()
+    _rå_formatert_cached.clear()
     return {"backup": backup_navn, "fane": fane_navn, "fra_rad": fra_rad}
 
 
@@ -1559,7 +1603,7 @@ def ensrett_butikkrader(sh, fane_navn, mal_rad, fra_rad, til_rad):
         }]})
         radhoyde_satt = True
 
-    _rå_formatert.clear()
+    _rå_formatert_cached.clear()
     return {"backup": backup_navn, "fane": fane_navn, "mal_rad": mal_rad, "fra_rad": fra_rad, "til_rad": til_rad, "radhoyde_satt": radhoyde_satt}
 
 
@@ -1590,8 +1634,8 @@ def ensrett_url_lenker(sh, fane_navn, fra_rad, til_rad):
 
     if oppdateringer:
         ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
-    _rå_formatert.clear()
-    _rå_formel.clear()
+    _rå_formatert_cached.clear()
+    _rå_formel_cached.clear()
     read_ratings.clear()
     return {"backup": backup_navn, "antall": len(oppdateringer)}
 
