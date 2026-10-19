@@ -1,4 +1,4 @@
-# tvungen full redeploy (feilsøker fastlåst build)
+# tvungen full redeploy nr. 2 (feilsøker fastlåst build)
 streamlit>=1.42.0
 gspread>=6.0.0
 google-auth>=2.29.0
