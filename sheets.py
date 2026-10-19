@@ -191,6 +191,23 @@ def _header_data_beregn(ws, grunnkolonner=None, rader=None):
     rad1 = rader[0] if len(rader) > 0 else []
     rad2 = rader[1] if len(rader) > 1 else []
 
+    # REELL BUG funnet i produksjon og rettet her: gspread returnerer RAGGED
+    # rader (trailing TOMME celler på slutten av en rad blir stille TRIMMET
+    # bort av selve Sheets-API-et – dokumentert gspread-oppførsel, ikke noe
+    # vi styrer). Hvis siste kriterium-kolonne sin rad-1-celle er tom (f.eks.
+    # fordi sammenslåingen av en eller annen grunn ikke dekket den helt til
+    # kanten), ble rad1 KORTERE enn rad2 – og siden bare rad2 ble paddet opp
+    # til rad1 sin lengde (aldri omvendt), kuttet zip() rad2 til rad1 sin
+    # (for korte) lengde og MISTET SISTE KOLONNE HELT (observert i praksis:
+    # «Agentic commerce», som er siste kolonne i Jury-fanen, forsvant
+    # sporløst fra kriterium_indeks – en avkrysning for den ble dermed
+    # ALDRI lagret, uten feilmelding). Padder nå BEGGE rader til samme,
+    # lengste lengde FØR forward-fyllingen, uansett hvilken av de to som
+    # måtte vise seg kortest.
+    lengde = max(len(rad1), len(rad2))
+    rad1 = rad1 + [""] * (lengde - len(rad1))
+    rad2 = rad2 + [""] * (lengde - len(rad2))
+
     siste = ""
     rad1_fylt = []
     for v in rad1:
@@ -200,7 +217,7 @@ def _header_data_beregn(ws, grunnkolonner=None, rader=None):
 
     grunnkolonne_indeks = {}
     kriterium_indeks = {}  # (fagfelt, kriterium) -> 1-indeksert kolonne
-    for i, (g1, g2) in enumerate(zip(rad1_fylt, rad2 + [""] * (len(rad1_fylt) - len(rad2))), start=1):
+    for i, (g1, g2) in enumerate(zip(rad1_fylt, rad2), start=1):
         if not g1:
             continue
         g2 = g2.strip() if g2 else ""
