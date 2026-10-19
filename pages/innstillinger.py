@@ -18,7 +18,8 @@ from jury import (
 from sheets import (
     FASE1_FANE, FASE2_FANE, GENERELLE_KOMMENTARER_FANE, ensrett_butikkrader, ensrett_url_lenker, er_finale_last,
     fane_oversikt, feilsok_farget_fane, feilsok_vurdering, finale_las_info, finn_tomme_butikkrader,
-    fjern_finale_las, fjern_formatering_fra_rad, flytt_fane_til_forst, konverter_scorer_til_tall, KOMMENTARER_FANE,
+    engangsfiks_epost_omdoping_feilplassering, fjern_finale_las, fjern_formatering_fra_rad, flytt_fane_til_forst,
+    konverter_scorer_til_tall, KOMMENTARER_FANE,
     legg_til_kriterium_kolonne, legg_til_na_i_datavalidering, merk_som_arkiv, migrer_orphan_fane,
     hent_api_kall_logg, hent_handling_logg, migrer_til_vurderinger_fane, migrer_vurderinger_til_farget_fane,
     nullstill_vurderinger,
@@ -702,6 +703,50 @@ kriterier_fase3 = aktive_kriterier(alle_kriterier, fase="Fase 3")
 felt_dict = kriterier_per_fagfelt(kriterier_fase3)
 navn_liste_jury = sorted(jury.keys())
 antall_jury_per_kriterium = {k: sum(1 for p in jury.values() if any(kr == k for kr in p["kriterier"])) for liste in felt_dict.values() for k in liste}
+
+st.divider()
+with st.expander("⚠ Engangsfiks: E-post-omdøping havnet i feil kolonne", icon=":material/build:"):
+    st.warning(
+        "En reell bug (cache-kollisjon, nå rettet i koden) gjorde at forrige E-post-omdøping skrev «Kundeklubb, "
+        "nyhetsbrev, e-post og SMS» inn i Innovasjon-gruppens FØRSTE kolonne i «Rangering ekspertvurdering» "
+        "(der «Innovative løsninger» sto), i stedet for i selve E-post-kolonnen. Denne knappen retter begge "
+        "cellene tilbake til riktig innhold – trygt å trykke selv om det alt er rettet (sjekker først).",
+        icon=":material/warning:",
+    )
+    if st.button("Rett opp feilplasseringen nå", icon=":material/build:"):
+        st.session_state["_vis_engangsfiks_dialog"] = True
+
+
+@st.dialog("Rette opp feilplassert kolonneoverskrift?")
+def engangsfiks_dialog():
+    st.write(f"Retter kolonneoverskriftene i «{FASE2_FANE}» tilbake til riktig innhold. Sikkerhetskopi tas først.")
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True, key="avbryt_engangsfiks"):
+        st.rerun()
+    if c2.button("Ja, rett opp nå", type="primary", use_container_width=True, icon=":material/build:", key="bekreft_engangsfiks"):
+        try:
+            with st.spinner("Sikkerhetskopierer og retter …"):
+                resultat = engangsfiks_epost_omdoping_feilplassering(sh)
+        except Exception as e:
+            vis_feil("Kunne ikke rette opp", e)
+        else:
+            st.session_state["_engangsfiks_resultat"] = resultat
+            st.rerun()
+
+
+if st.session_state.get("_vis_engangsfiks_dialog"):
+    st.session_state["_vis_engangsfiks_dialog"] = False
+    engangsfiks_dialog()
+
+if st.session_state.get("_engangsfiks_resultat"):
+    r = st.session_state.pop("_engangsfiks_resultat")
+    if r["endringer"]:
+        st.success("Ferdig! Rettet:", icon=":material/check_circle:")
+        for e in r["endringer"]:
+            st.markdown(f"- {e}")
+    else:
+        st.info("Ingen feilplassering funnet – var allerede riktig.", icon=":material/info:")
+    st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
 
 st.divider()
 st.subheader("Kriterienavn til godkjenning", anchor=False)

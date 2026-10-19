@@ -438,6 +438,42 @@ def oppdater_snitt_totalt_formler(sh, fane_navn):
     return {"antall": len(oppdateringer)}
 
 
+def engangsfiks_epost_omdoping_feilplassering(sh):
+    """ÉN GANGS reparasjon av en reell produksjonsbug (se commit som fjernet
+    cache-kollisjonen i _header_data): en tidligere omdøping av «E-post» →
+    «Kundeklubb, nyhetsbrev, e-post og SMS» traff en cachet kolonne-indeks
+    fra «Rangering juryvurdering» (som har én ekstra kolonne og dermed en
+    annen forskyvning) i stedet for «Rangering ekspertvurdering» sin EGEN,
+    riktige kolonne – og skrev derfor det nye navnet inn i Innovasjon-
+    gruppens FØRSTE kolonne (der «Innovative løsninger» sto) i stedet for i
+    selve E-post-kolonnen under Markedsføring/kundedialog.
+
+    Retter begge cellene tilbake, basert på dagens (fiksede) kolonneoppslag.
+    Trygt å kjøre flere ganger – sjekker faktisk tilstand før hver skriving,
+    så den blir en no-op andre gang."""
+    backup_navn = sikkerhetskopier_alle_faner(sh)
+    ws = sh.worksheet(FASE2_FANE)
+    grunn, krit, _ = _header_data(ws)
+    endringer = []
+
+    kol_epost = krit.get(("Markedsføring/kundedialog", "E-post"))
+    if kol_epost:
+        celle = gspread.utils.rowcol_to_a1(2, kol_epost)
+        ws.update([["Kundeklubb, nyhetsbrev, e-post og SMS"]], range_name=celle)
+        endringer.append(f"{celle}: «E-post» → «Kundeklubb, nyhetsbrev, e-post og SMS»")
+
+    kol_feilplassert = krit.get(("Innovasjon", "Kundeklubb, nyhetsbrev, e-post og SMS"))
+    if kol_feilplassert:
+        celle = gspread.utils.rowcol_to_a1(2, kol_feilplassert)
+        ws.update([["Innovative løsninger"]], range_name=celle)
+        endringer.append(f"{celle}: «Kundeklubb, nyhetsbrev, e-post og SMS» → «Innovative løsninger»")
+
+    _header_data_cached.clear()
+    _rå_formatert_cached.clear()
+    read_ratings.clear()
+    return {"backup": backup_navn, "endringer": endringer}
+
+
 def _sikre_fase2_fane(sh):
     """Oppretter "Rangering fase 2" ved å DUPLISERE Fase 1-fanen (beholder
     farger/sammenslåinger/nedtrekkslister/filter/frysing automatisk), og
