@@ -365,11 +365,19 @@ def read_jury(_sh):
     return resultat
 
 
+_MIDLERTIDIG_DEBUG_SISTE_SKRIVING = None  # MIDLERTIDIG - fjernes igjen etter feilsøking av lagringsbugen
+
+
+def hent_midlertidig_debug_siste_skriving():
+    return _MIDLERTIDIG_DEBUG_SISTE_SKRIVING
+
+
 def write_jury(sh, navn, kriterier_valgt: set, epost="", farge=""):
     """Oppretter raden for jurymedlemmet hvis den mangler, ellers oppdaterer
     kun DENNE radens celler – aldri resten av fanen. Finner cellene for
     Navn/E-post/Farge på overskriftene (ALDRI faste bokstaver), akkurat som
     kriterium-cellene."""
+    global _MIDLERTIDIG_DEBUG_SISTE_SKRIVING
     ws = sikre_jury_fane(sh)
     grunn, krit, siste = _header_data(ws, grunnkolonner=JURY_GRUNNKOLONNER)
     jury = read_jury(sh)
@@ -399,7 +407,11 @@ def write_jury(sh, navn, kriterier_valgt: set, epost="", farge=""):
 
     if not oppdateringer:
         raise ValueError("Fant ingen kolonner å skrive til i Jury-fanen – sjekk at overskriftene i rad 1/2 ikke er endret manuelt.")
-    ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
+    respons = ws.batch_update(oppdateringer, value_input_option="USER_ENTERED")
+    _MIDLERTIDIG_DEBUG_SISTE_SKRIVING = {
+        "navn": navn, "rad_nr": rad_nr, "kriterier_valgt": sorted(kriterier_valgt),
+        "oppdateringer": oppdateringer, "respons": respons,
+    }
     read_jury.clear()
 
 

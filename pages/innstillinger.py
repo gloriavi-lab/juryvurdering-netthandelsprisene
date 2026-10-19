@@ -10,6 +10,7 @@ import streamlit as st
 from components import hent_versjonsinfo, status_prikk, topptekst, vis_feil
 from jury import (
     add_criterion, aktive_kriterier, aktiv_fase, deaktiver_kriterium, fagfelt_liste, finn_duplisert_kriterium,
+    hent_midlertidig_debug_siste_skriving,
     JURY_FANE, kriterier_per_fagfelt, manglende_foreslatte_kriterier, manglende_kriterium_kolonner,
     manglende_kriterium_omdopinger,
     manglende_veiledning_oppdateringer, mine_kriterier, omdop_kriterium, oppdater_kriterium, oppdater_veiledning_rad,
@@ -692,6 +693,11 @@ else:
 
 st.divider()
 st.subheader("Jury og kriterier", anchor=False)
+
+_debug_skriving = hent_midlertidig_debug_siste_skriving()
+if _debug_skriving:
+    with st.expander("MIDLERTIDIG DEBUG: siste skriving til Jury-fanen (fjernes etter feilsøking)", icon=":material/bug_report:"):
+        st.json(_debug_skriving, expanded=True)
 
 try:
     alle_kriterier = read_criteria(sh)
