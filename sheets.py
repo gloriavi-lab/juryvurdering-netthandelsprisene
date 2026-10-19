@@ -162,7 +162,7 @@ def koble_sheets():
 # ─────────────────────────────────────────────
 # Header-oppslag – ALDRI faste kolonnebokstaver
 # ─────────────────────────────────────────────
-def _header_data_beregn(ws, grunnkolonner=None):
+def _header_data_beregn(ws, grunnkolonner=None, rader=None):
     """Selve beregningen, UTEN mellomlagring – se _header_data() under for
     hvorfor dette er splittet ut. Leser rad 1+2 (med combine_merged_cells
     slik at en sammenslått gruppeoverskrift gjentas i hver kolonne den
@@ -175,9 +175,19 @@ def _header_data_beregn(ws, grunnkolonner=None):
     En kolonne regnes som en FAGFELT-gruppe (ikke en grunnkolonne) når den
     IKKE står i grunnkolonner-lista og har et eget navn i rad 2 – ikke lenger
     avhengig av en hardkodet liste med fagfeltnavn, siden Kriterier-fanen nå
-    er den egentlige kilden til hvilke fagfelt som finnes."""
+    er den egentlige kilden til hvilke fagfelt som finnes.
+
+    rader (valgfritt, ytelse – punkt om å slå sammen kall): hvis kalleren
+    ALLEREDE har hentet hele fanen (f.eks. via _rå_formatert, som uansett
+    dekker rad 1+2), send de to første radene inn her i stedet for å la
+    denne funksjonen gjøre SIN EGEN separate "A1:ZZ2"-henting (som – fordi
+    combine_merged_cells=True – koster et EKSTRA Sheets-kall i tillegg til
+    selve verdihentingen). Kutter rundt 2 unødvendige HTTP-kall per side-
+    visning i de vanligste lesefunksjonene (read_stores/read_ratings/
+    read_fase1_scores), se kallstedene der."""
     grunnkolonner = grunnkolonner if grunnkolonner is not None else GRUNNKOLONNER + [SNITT_KOLONNE_NAVN]
-    rader = ws.get("A1:ZZ2", combine_merged_cells=True)
+    if rader is None:
+        rader = ws.get("A1:ZZ2", combine_merged_cells=True)
     rad1 = rader[0] if len(rader) > 0 else []
     rad2 = rader[1] if len(rader) > 1 else []
 
@@ -205,11 +215,11 @@ def _header_data_beregn(ws, grunnkolonner=None):
 
 
 @st.cache_data(ttl=60, show_spinner=False)
-def _header_data_cached(_ws, fane_nokkel, grunnkolonner=None):
-    return _header_data_beregn(_ws, grunnkolonner)
+def _header_data_cached(_ws, fane_nokkel, grunnkolonner=None, _rader=None):
+    return _header_data_beregn(_ws, grunnkolonner, _rader)
 
 
-def _header_data(_ws, grunnkolonner=None):
+def _header_data(_ws, grunnkolonner=None, _rader=None):
     """Mellomlagret wrapper rundt _header_data_beregn() – IKKE slå sammen
     disse to igjen. Sender med fanens EGEN identitet (regneark-ID + fanenavn)
     som en eksplisitt, HASHBAR del av cache-nøkkelen (fane_nokkel, uten
@@ -225,9 +235,13 @@ def _header_data(_ws, grunnkolonner=None):
     «Rangering juryvurdering» (FASE1) har én ekstra kolonne («Jurymedlem»)
     som «Rangering ekspertvurdering» (FASE2) mangler, er ALLE kolonner
     forskjøvet én plass mellom de to fanene. Dette skrev en kriterietekst
-    inn i FEIL kolonne under en omdøping i produksjon (se git-historikk)."""
+    inn i FEIL kolonne under en omdøping i produksjon (se git-historikk).
+
+    _rader (valgfritt, understrek siden den er ulagelig/urelevant for selve
+    cache-nøkkelen – se _header_data_beregn): send inn hvis kalleren alt har
+    hele fanen (fra _rå_formatert) for å unngå et unødvendig ekstra kall."""
     fane_nokkel = f"{getattr(_ws.spreadsheet, 'id', '?')}:{_ws.title}"
-    return _header_data_cached(_ws, fane_nokkel, grunnkolonner)
+    return _header_data_cached(_ws, fane_nokkel, grunnkolonner, _rader)
 
 
 def _sikre_ekstra_kolonner(ws, grunnkolonne_indeks, siste_kolonne):
@@ -619,19 +633,27 @@ def read_stores(_sh):
     funksjonen, se grep av read_stores()-kallene.
 
     read_fase1_scores() leser FORTSATT direkte fra Fase 1-fanen – det er en
-    egen, separat ting (Fase 1-SCORER som referanse), ikke butikklisten."""
+    egen, separat ting (Fase 1-SCORER som referanse), ikke butikklisten.
+
+    Ytelse: henter _rå_formatert FØR _header_data og gjenbruker de to første
+    radene derfra (_rader=) – sparer _header_data sitt eget separate
+    "A1:ZZ2"-kall (som ellers koster et EKSTRA Sheets-kall pga.
+    combine_merged_cells=True), siden _les_butikkliste uansett trenger hele
+    fanen og allerede henter den."""
     ws = _sikre_fase2_fane(_sh)
-    grunn, _, _ = _header_data(ws)
+    formatert = _rå_formatert(ws)
+    grunn, _, _ = _header_data(ws, _rader=formatert[:2])
     return _les_butikkliste(ws, grunn)
 
 
 @st.cache_data(ttl=60, show_spinner=False)
 def read_fase1_scores(_sh):
     """{butikknavn: {kriterium: score}} fra Fase 1-fanen, til bruk som
-    referanse (f.eks. Fase1-snitt på Butikker-siden)."""
+    referanse (f.eks. Fase1-snitt på Butikker-siden). Ytelse: se read_stores
+    for hvorfor _rå_formatert hentes FØR _header_data."""
     ws = _fane(_sh, FASE1_FANE)
-    grunn, krit, _ = _header_data(ws)
     formatert = _rå_formatert(ws)
+    grunn, krit, _ = _header_data(ws, _rader=formatert[:2])
     kol_butikk = grunn.get("Butikk")
     resultat = {}
     for r in range(FORSTE_DATARAD, len(formatert) + 1):
@@ -651,10 +673,11 @@ def read_fase1_scores(_sh):
 def read_ratings(_sh):
     """{butikknavn: {"scorer": {kriterium: score}, "kommentarer": {fagfelt:
     kommentar}, "sist_endret":.., "endret_av":..}} fra Fase 2-fanen – scoren
-    ER cellen i rutenettet, det finnes ingen egen Rådata-fane lenger."""
+    ER cellen i rutenettet, det finnes ingen egen Rådata-fane lenger.
+    Ytelse: se read_stores for hvorfor _rå_formatert hentes FØR _header_data."""
     ws = _sikre_fase2_fane(_sh)
-    grunn, krit, _ = _header_data(ws)
     formatert = _rå_formatert(ws)
+    grunn, krit, _ = _header_data(ws, _rader=formatert[:2])
     kol_butikk = grunn.get("Butikk")
     resultat = {}
     for r in range(FORSTE_DATARAD, len(formatert) + 1):

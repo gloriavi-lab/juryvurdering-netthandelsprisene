@@ -16,8 +16,8 @@ import gspread
 import streamlit as st
 
 from sheets import (
-    FASE2_FANE, FORSTE_DATARAD, _bygg_gruppert_header, _header_data, _rå_formatert, hent_eller_lag_fane,
-    read_ratings, sikkerhetskopier_alle_faner,
+    FASE2_FANE, FORSTE_DATARAD, _bygg_gruppert_header, _header_data, _header_data_cached, _rå_formatert,
+    _rå_formatert_cached, hent_eller_lag_fane, read_ratings, sikkerhetskopier_alle_faner,
 )
 
 KRITERIER_FANE = "Kriterier"
