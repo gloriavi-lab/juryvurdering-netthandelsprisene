@@ -1413,14 +1413,17 @@ def slett_alle_backup_faner(sh):
     """ENGANGSOPPRYDDING: sletter PERMANENT alle faner som starter med
     «Backup_» - de ble laget av en tidligere versjon av appen (nå fjernet,
     se sikkerhetskopier_alle_faner), og brukeren har selv tatt en egen
-    sikkerhetskopi av hele fila før dette kjøres. Returnerer antall slettet."""
-    slettet = 0
-    for ws in list(sh.worksheets()):
-        if ws.title.startswith("Backup_"):
-            sh.del_worksheet(ws)
-            slettet += 1
+    sikkerhetskopi av hele fila før dette kjøres. Ett eneste batch_update-
+    kall (ikke ett del_worksheet-kall per fane) - det kan fort bli mange
+    titalls faner, og ett samlet kall er raskere og unngår å treffe
+    Google sin kvote. Returnerer antall slettet."""
+    backup_faner = [ws for ws in sh.worksheets() if ws.title.startswith("Backup_")]
+    if not backup_faner:
+        return 0
+    requests = [{"deleteSheet": {"sheetId": ws.id}} for ws in backup_faner]
+    sh.batch_update({"requests": requests})
     fane_oversikt.clear()
-    return slettet
+    return len(backup_faner)
 
 
 def merk_som_arkiv(sh, fane_navn):
