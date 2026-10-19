@@ -1,4 +1,4 @@
-# tvungen full redeploy nr. 2 (feilsøker fastlåst build)
+# tvungen full redeploy nr. 3 (prosessen kjørte fortsatt gammel in-memory kode)
 streamlit>=1.42.0
 gspread>=6.0.0
 google-auth>=2.29.0
