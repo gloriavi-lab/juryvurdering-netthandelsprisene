@@ -25,6 +25,7 @@ from sheets import (
     nullstill_vurderinger,
     read_fase1_scores, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger,
     sett_opp_kommentarer_som_formelvisning, sikkerhetskopier_alle_faner, sjekk_gammel_fane_for_orphan_data,
+    slett_alle_backup_faner,
     test_tilkobling, VURDERINGER_FANE,
 )
 from theme import FAGFELT_FARGE
@@ -689,6 +690,39 @@ else:
                 else:
                     st.toast("Oppdatert", icon=":material/check_circle:")
                     st.rerun()
+
+st.divider()
+st.divider()
+with st.expander("MIDLERTIDIG: slett alle Backup_-faner (engangsopprydding)", icon=":material/delete_sweep:"):
+    st.warning("Sletter PERMANENT alle faner som starter med «Backup_». Brukeren har bekreftet å ha tatt egen sikkerhetskopi av fila.", icon=":material/warning:")
+    if st.button("Slett alle Backup_-faner nå", icon=":material/delete_sweep:"):
+        st.session_state["_vis_slett_backup_dialog"] = True
+
+
+@st.dialog("Slette alle Backup_-faner?")
+def _slett_backup_dialog():
+    st.write("Dette sletter PERMANENT alle faner som starter med «Backup_» i regnearket. Dette kan IKKE angres fra appen.")
+    c1, c2 = st.columns(2)
+    if c1.button("Avbryt", use_container_width=True, key="avbryt_slett_backup"):
+        st.rerun()
+    if c2.button("Ja, slett nå", type="primary", use_container_width=True, icon=":material/delete_sweep:", key="bekreft_slett_backup"):
+        try:
+            with st.spinner("Sletter Backup_-faner …"):
+                antall = slett_alle_backup_faner(sh)
+        except Exception as e:
+            vis_feil("Kunne ikke slette Backup_-faner", e)
+        else:
+            st.session_state["_slett_backup_resultat"] = antall
+            st.rerun()
+
+
+if st.session_state.get("_vis_slett_backup_dialog"):
+    st.session_state["_vis_slett_backup_dialog"] = False
+    _slett_backup_dialog()
+
+if st.session_state.get("_slett_backup_resultat") is not None:
+    _antall = st.session_state.pop("_slett_backup_resultat")
+    st.success(f"Ferdig! {_antall} Backup_-fane(r) slettet.", icon=":material/check_circle:")
 
 st.divider()
 st.subheader("Jury og kriterier", anchor=False)

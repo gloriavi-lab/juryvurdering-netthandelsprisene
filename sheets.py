@@ -1256,17 +1256,12 @@ def upsert_generell_kommentar(sh, butikk, jurymedlem, kommentar):
 
 
 def sikkerhetskopier_alle_faner(sh):
-    """Dupliserer HVER fane i regnearket med et tidsstempel i navnet, FØR en
-    strukturendring. Returnerer listen med nye fanenavn."""
-    tidsstempel = naa_norsk().strftime("%Y%m%d-%H%M%S")
-    nye_navn = []
-    for ws in list(sh.worksheets()):
-        if ws.title.startswith("Backup_"):
-            continue  # ikke sikkerhetskopier gamle sikkerhetskopier
-        nytt_navn = f"Backup_{tidsstempel}_{ws.title}"[:99]  # Google Sheets har en lengdegrense på fanenavn
-        sh.duplicate_sheet(ws.id, new_sheet_name=nytt_navn)
-        nye_navn.append(nytt_navn)
-    return nye_navn
+    """DEAKTIVERT etter eksplisitt beskjed: appen skal ALDRI lage Backup_-
+    faner i regnearket (brukeren tar sikkerhetskopi av selve fila sin egen
+    vei). Gjøres til en no-op (i stedet for å fjerne alle ~13 kallsteder)
+    for å holde endringen liten og trygg – alle eksisterende kallere får
+    fortsatt en (nå alltid tom) liste tilbake, akkurat som før."""
+    return []
 
 
 def migrer_til_vurderinger_fane(sh):
@@ -1412,6 +1407,20 @@ def fane_oversikt(_sh):
             status, forklaring = ("Ukjent", "Ikke brukt av appen i dagens modell – kandidat for arkiv-merking.")
         resultat.append({"navn": navn, "status": status, "forklaring": forklaring, "kan_arkiveres": status == "Ukjent"})
     return resultat
+
+
+def slett_alle_backup_faner(sh):
+    """ENGANGSOPPRYDDING: sletter PERMANENT alle faner som starter med
+    «Backup_» - de ble laget av en tidligere versjon av appen (nå fjernet,
+    se sikkerhetskopier_alle_faner), og brukeren har selv tatt en egen
+    sikkerhetskopi av hele fila før dette kjøres. Returnerer antall slettet."""
+    slettet = 0
+    for ws in list(sh.worksheets()):
+        if ws.title.startswith("Backup_"):
+            sh.del_worksheet(ws)
+            slettet += 1
+    fane_oversikt.clear()
+    return slettet
 
 
 def merk_som_arkiv(sh, fane_navn):
