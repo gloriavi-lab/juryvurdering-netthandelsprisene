@@ -349,9 +349,19 @@ def legg_til_kriterium_kolonne(sh, fane_navn, fagfelt, nytt_kriterium):
 
     Dette er det ENESTE stedet appen endrer struktur/formatering i en
     Rangering-/Jury-fane – skal KUN kalles etter eksplisitt bekreftelse fra
-    brukeren (st.dialog), se pages/innstillinger.py."""
+    brukeren (st.dialog), se pages/innstillinger.py.
+
+    IDEMPOTENT: tvinger fersk lesing (ignorerer ev. foreldet cache) og
+    hopper stille over (returnerer False) hvis kolonnen allerede finnes –
+    gjør det trygt å kalle denne flere ganger/på nytt (f.eks. fra «Legg til
+    de manglende kolonnene nå») uten risiko for duplikatkolonner, selv om
+    diagnosen den bygger på skulle vise seg å være foreldet. Returnerer
+    True hvis en kolonne faktisk ble satt inn."""
     ws = _fane(sh, fane_navn)
+    _header_data_cached.clear()
     grunn, krit, siste = _header_data(ws)
+    if (fagfelt, nytt_kriterium) in krit:
+        return False
     kolonner_i_gruppe = sorted(kol for (f, k), kol in krit.items() if f == fagfelt)
     if not kolonner_i_gruppe:
         raise ValueError(f"Fant ingen eksisterende kolonner for fagfeltet «{fagfelt}» i «{fane_navn}» å kopiere format fra.")
@@ -406,6 +416,7 @@ def legg_til_kriterium_kolonne(sh, fane_navn, fagfelt, nytt_kriterium):
     # i stedet for å stole på at Sheets utvider den selv.
     if SNITT_KOLONNE_NAVN in grunn:
         oppdater_snitt_totalt_formler(sh, fane_navn)
+    return True
 
 
 def oppdater_snitt_totalt_formler(sh, fane_navn):

@@ -840,19 +840,27 @@ def manglende_kolonner_dialog(mangler_fase2, mangler_jury):
         st.rerun()
     if c2.button("Ja, legg til nå", type="primary", use_container_width=True, icon=":material/add_box:", key="bekreft_manglende_kolonner"):
         feilet = []
+        lagt_til = 0
+        hoppet_over = 0
         with st.spinner("Sikkerhetskopierer og legger til kolonner …"):
             backup_navn = sikkerhetskopier_alle_faner(sh)
             for fagfelt, kriterium in mangler_fase2:
                 try:
-                    legg_til_kriterium_kolonne(sh, FASE2_FANE, fagfelt, kriterium)
+                    if legg_til_kriterium_kolonne(sh, FASE2_FANE, fagfelt, kriterium):
+                        lagt_til += 1
+                    else:
+                        hoppet_over += 1
                 except Exception as e:
                     feilet.append(f"«{kriterium}» i «{FASE2_FANE}»: {e}")
             for fagfelt, kriterium in mangler_jury:
                 try:
-                    legg_til_kriterium_kolonne(sh, JURY_FANE, fagfelt, kriterium)
+                    if legg_til_kriterium_kolonne(sh, JURY_FANE, fagfelt, kriterium):
+                        lagt_til += 1
+                    else:
+                        hoppet_over += 1
                 except Exception as e:
                     feilet.append(f"«{kriterium}» i «{JURY_FANE}»: {e}")
-        st.session_state["_manglende_kolonner_resultat"] = {"backup": backup_navn, "feilet": feilet, "antall": len(mangler_fase2) + len(mangler_jury) - len(feilet)}
+        st.session_state["_manglende_kolonner_resultat"] = {"backup": backup_navn, "feilet": feilet, "antall": lagt_til, "hoppet_over": hoppet_over}
         st.rerun()
 
 
@@ -863,6 +871,8 @@ if st.session_state.get("_vis_manglende_kolonner_dialog"):
 if st.session_state.get("_manglende_kolonner_resultat"):
     r = st.session_state.pop("_manglende_kolonner_resultat")
     st.success(f"Ferdig! {r['antall']} kolonne(r) lagt til.", icon=":material/check_circle:")
+    if r.get("hoppet_over"):
+        st.caption(f"{r['hoppet_over']} hoppet over (fantes allerede – diagnosen var foreldet, ingen duplikat laget).")
     st.caption(f"Sikkerhetskopier: {', '.join(r['backup'])}")
     if r["feilet"]:
         with st.expander(f"{len(r['feilet'])} feilet"):
