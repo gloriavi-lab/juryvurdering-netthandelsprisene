@@ -111,7 +111,7 @@ body {{ overflow-wrap: normal; word-break: normal; }}
    (så hvit tekst på knapper/merkelapper påvirkes ikke, de har allerede sin
    egen, mer spesifikke regel), og løser dermed kontrastproblemet helt
    uavhengig av om Streamlit sin egen temadeteksjon fungerer her eller ei. */
-.stApp {{ background-color: var(--lys-bakgrunn); color: var(--tekst); }}
+.stApp {{ background-color: var(--lys-bakgrunn); color: var(--tekst) !important; }}
 div[data-testid="stExpander"] {{ background-color: var(--kort-bakgrunn); border-radius: 12px; border: 1px solid var(--kant); }}
 div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px; padding: 20px; background: var(--kort-bakgrunn); }}
 
