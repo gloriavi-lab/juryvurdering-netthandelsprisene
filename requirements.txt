@@ -1,4 +1,4 @@
-# tvungen full redeploy nr. 4 (store Innstillinger-endringen krevde full restart)
+# tvungen full redeploy nr. 5 (!important-fiksen for mørk modus kom ikke frem)
 streamlit>=1.42.0
 gspread>=6.0.0
 google-auth>=2.29.0
