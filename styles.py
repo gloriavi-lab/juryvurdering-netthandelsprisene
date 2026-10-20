@@ -98,7 +98,20 @@ CSS = f"""
    hver "/" i komponentene selv), derfor normal/normal som default. */
 body {{ overflow-wrap: normal; word-break: normal; }}
 
-.stApp {{ background-color: var(--lys-bakgrunn); }}
+/* VIKTIG (reell bug funnet i mørk modus): Streamlit sin EGEN temamotor
+   (som styrer farge på native h1/h2/h3/p/span/label – IKKE custom HTML vi
+   selv skriver) oppdaget IKKE nettleserens/OS sin prefers-color-scheme i
+   denne hosting-konteksten (bekreftet: native overskrifter beholdt
+   Streamlit sin lyse standardfarge rgb(49,51,63) selv når OS/nettleser sto
+   på mørk modus) – selv om .streamlit/config.toml bevisst IKKE låser
+   textColor, nettopp for at dette skulle følge systeminnstillingen
+   automatisk. Satte derfor FARGE her også (ikke bare bakgrunn), via SAMME
+   --tekst-variabel som allerede er mørk-tilpasset – dette ARVES av alle
+   native tekst-elementer som selv IKKE har en mer spesifikk fargeregel
+   (så hvit tekst på knapper/merkelapper påvirkes ikke, de har allerede sin
+   egen, mer spesifikke regel), og løser dermed kontrastproblemet helt
+   uavhengig av om Streamlit sin egen temadeteksjon fungerer her eller ei. */
+.stApp {{ background-color: var(--lys-bakgrunn); color: var(--tekst); }}
 div[data-testid="stExpander"] {{ background-color: var(--kort-bakgrunn); border-radius: 12px; border: 1px solid var(--kant); }}
 div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px; padding: 20px; background: var(--kort-bakgrunn); }}
 
