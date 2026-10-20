@@ -168,7 +168,7 @@ else:
                     tildelt = k in mine_kriterier(jury, navn)
                     if tildelt:
                         dekning[k] += 1
-                    rad += f"<td style='text-align:center;background:{FAGFELT_FARGE.get(kat, '#888')}14;'>{'✅' if tildelt else ''}</td>"
+                    rad += f"<td style='text-align:center;background:color-mix(in srgb, {FAGFELT_FARGE.get(kat, '#888')} 8%, transparent);'>{'✅' if tildelt else ''}</td>"
             rad += "</tr>"
             rader_html += rad
 

@@ -117,7 +117,7 @@ def status_merkelapp_html(status: str) -> str:
     farge = STATUS_FARGE.get(status, "#888")
     tekst = STATUS_TEKST.get(status, status)
     symbol = {"Ferdig": "✓", "Påbegynt": "◐", "Ikke startet": "○"}.get(status, "")
-    return f'<span class="status-merkelapp" style="background:{farge}1A;color:{farge};">{symbol} {tekst}</span>'
+    return f'<span class="status-merkelapp" style="background:color-mix(in srgb, {farge} 10%, transparent);color:{farge};">{symbol} {tekst}</span>'
 
 
 def rutenett(kort_html_liste, tre_per_rad=False):
@@ -268,7 +268,7 @@ def regneark_tabell(butikker: dict, ratings: dict, kriterier_per_fagfelt: dict, 
                 continue
             barn.append({
                 "field": felt, "headerName": krit[:16] + ("…" if len(krit) > 16 else ""), "headerTooltip": krit, "width": 110,
-                "cellStyle": JsCode(f"function(p) {{ return p.value ? {{backgroundColor: '{farge}22'}} : {{}}; }}"),
+                "cellStyle": JsCode(f"function(p) {{ return p.value ? {{backgroundColor: 'color-mix(in srgb, {farge} 13%, transparent)'}} : {{}}; }}"),
             })
         if barn:
             kolonne_defs.append({"headerName": fagfelt, "headerClass": klasse_css, "children": barn})

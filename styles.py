@@ -23,8 +23,31 @@ CSS = f"""
     --tekst: #1C1C1C;
     --tekst-dempet: #4A4944;  /* mørkere enn forrige runde for bedre WCAG AA-kontrast */
     --merke: {BRING_GRONN};
+    --merke-tekst: {BRING_GRONN};  /* egen variant for TEKST direkte på sidebakgrunn, se .merke-tekst */
     --feil: #C8102E;
     --gronn: #1E8E5A;
+
+    /* Fagfelt (theme.FAGFELT_FARGE) – uendret i mørk modus der kontrasten
+       allerede er god nok (Kundeservice/Kjøp/Markedsføring), justert der
+       den ikke er det (Førsteinntrykk/Innovasjon), se @media-blokken. */
+    --fagfelt-forsteinntrykk: #4472C4;
+    --fagfelt-kundeservice: #5B9BD5;
+    --fagfelt-kjop: #70AD47;
+    --fagfelt-markedsforing: #ED7D31;
+    --fagfelt-innovasjon: #7030A0;
+
+    /* Størrelsesklasse-toner (theme.KLASSE_TONE) – pastell-bakgrunner */
+    --klasse-liten: #E7F3EC;
+    --klasse-medium: #E6F0F5;
+    --klasse-stor: #FBF1E0;
+
+    /* Status (theme.STATUS_FARGE/STATUS_TONE) – gjenbruker --gronn for Ferdig */
+    --status-ferdig: var(--gronn);
+    --status-pabegynt: #C8A200;
+    --status-ikke-startet: #8A8780;
+    --status-tone-ferdig: #E7F3EC;
+    --status-tone-pabegynt: #FBF1D6;
+    --status-tone-ikke-startet: #F0EFEC;
 }}
 @media (prefers-color-scheme: dark) {{
     :root {{
@@ -33,6 +56,29 @@ CSS = f"""
         --kant: #3A3A3A;
         --tekst: #F2F2F2;
         --tekst-dempet: #C2C0BB;  /* WCAG AA mot mørk bakgrunn */
+
+        /* Disse er for mørke/lave til å leses direkte på mørk bakgrunn i sin
+           opprinnelige, lys-modus-godkjente form – lysnet her, men ALDRI i
+           lys modus (så ingenting endrer seg for noen som ikke bruker mørk
+           modus). Kontrast dobbeltsjekket (WCAG AA, ≥4.5:1) mot BÅDE
+           --lys-bakgrunn og --kort-bakgrunn sine mørke verdier over. */
+        --merke-tekst: color-mix(in srgb, {BRING_GRONN} 75%, white);
+        --feil: color-mix(in srgb, #C8102E 70%, white);
+        --gronn: color-mix(in srgb, #1E8E5A 75%, white);
+        --fagfelt-forsteinntrykk: color-mix(in srgb, #4472C4 75%, white);
+        --fagfelt-innovasjon: color-mix(in srgb, #7030A0 60%, white);
+        --status-ikke-startet: color-mix(in srgb, #8A8780 85%, white);
+
+        /* Pastell-tonene (lyse bakgrunnsflater) blir i stedet en SVAK
+           fargetint oppå det mørke kortet – samme logikk som en lys
+           pastell, bare mørk-tilpasset i stedet for bare å gjenbruke den
+           lyse (nesten hvite) fargen rått på en mørk bakgrunn. */
+        --klasse-liten: color-mix(in srgb, #1E8E5A 18%, var(--kort-bakgrunn));
+        --klasse-medium: color-mix(in srgb, #4472C4 18%, var(--kort-bakgrunn));
+        --klasse-stor: color-mix(in srgb, #ED7D31 18%, var(--kort-bakgrunn));
+        --status-tone-ferdig: color-mix(in srgb, #1E8E5A 18%, var(--kort-bakgrunn));
+        --status-tone-pabegynt: color-mix(in srgb, #C8A200 18%, var(--kort-bakgrunn));
+        --status-tone-ikke-startet: color-mix(in srgb, #8A8780 18%, var(--kort-bakgrunn));
     }}
 }}
 
@@ -96,7 +142,7 @@ div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px;
 .rutenett-kort.aktiv {{ border:1.5px solid var(--merke); border-top:4px solid var(--merke); box-shadow: 0 0 0 3px color-mix(in srgb, var(--merke) 15%, transparent); }}
 .rutenett-kort.farget {{ color:white; }}
 .rutenett-kort h4 {{ margin:0 0 12px 0; font-size:14.5px; line-height:1.3; color:var(--tekst); min-height:2.6em; display:flex; align-items:flex-start; }}
-.rutenett-kort .merke-tekst {{ color:var(--merke); font-weight:700; }}
+.rutenett-kort .merke-tekst {{ color:var(--merke-tekst); font-weight:700; }}
 .rutenett-kort ul {{ margin:0; padding-left:18px; flex:1; }}
 .rutenett-kort li {{ margin-bottom:7px; color:var(--tekst); font-size:13.5px; line-height:1.4; }}
 .rutenett-kort .belop {{ color:var(--tekst-dempet); font-size:13px; margin-top:2px; }}
