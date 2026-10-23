@@ -1843,7 +1843,7 @@ def read_testkjop(_sh):
         steg = str(r.get("Steg", "")).strip()
         if not (butikk and jurymedlem and steg):
             continue
-        resultat.setdefault((butikk, jurymedlem), {})[steg] = dict(r)
+        resultat.setdefault((butikk, jurymedlem), {})[steg] = {k: str(v) for k, v in r.items()}
     return resultat
 
 
@@ -1886,7 +1886,7 @@ def read_testkjop_kundeservice(_sh):
         kanal = str(r.get("Kanal", "")).strip()
         if not (butikk and jurymedlem and kanal):
             continue
-        resultat.setdefault((butikk, jurymedlem), []).append(dict(r))
+        resultat.setdefault((butikk, jurymedlem), []).append({k: str(v) for k, v in r.items()})
     return resultat
 
 
