@@ -1759,3 +1759,184 @@ def finn_tomme_butikkrader(sh, fane_navn, fra_rad, til_rad):
         if not navn:
             tomme.append(r)
     return tomme
+
+
+# ─────────────────────────────────────────────
+# Testkjøp – tildeling, registrering av funn per steg, kundeservice-kanaler
+# ─────────────────────────────────────────────
+TESTKJOP_TILDELING_FANE = "Testkjøp-tildeling"
+TESTKJOP_TILDELING_HEADER = ["Jurymedlem", "Butikk"]
+
+TESTKJOP_FANE = "Testkjøp"
+# De 8 stegene som vises i selve tidslinjen, i rekkefølge.
+TESTKJOP_TIDSLINJE_STEG = [
+    "Før kjøp", "Kassen", "Kommunikasjon", "Levering", "Utpakking", "Kundeservice", "Retur", "Pengene tilbake",
+]
+# Tverrgående – eget lite skjema per butikk, IKKE del av tidslinjen.
+TESTKJOP_TVERRGAENDE_STEG = ["Mobilopplevelse", "Compliance", "Universell utforming"]
+TESTKJOP_FELLES_KOLONNER = ["Butikk", "Jurymedlem", "Steg", "Tidspunkt", "Score", "Kommentar"]
+# Steg-spesifikke kolonner, én kolonne per felt beskrevet i brief - kun den
+# aktuelle radens eget steg fyller ut "sine" kolonner, resten står tomme.
+TESTKJOP_STEG_KOLONNER = [
+    "Info om levering vist",  # Steg 1 - Før kjøp
+    "Antall leveringsalternativer", "Relevante alternativer", "ETA vist", "Lovet leveringsdato",
+    "Betalingsmåter", "Måtte opprette konto", "Forhåndsavkrysset samtykke", "Totalpris vist",  # Steg 2 - Kassen
+    "Ordrebekreftelse mottatt", "Info om retur", "Mersalg", "Råd og tips",  # Steg 3 - Kommunikasjon
+    "Faktisk leveringsdato",  # Steg 4 - Levering
+    "Emballasje", "Produkt som beskrevet", "Returinfo i pakken",  # Steg 5 - Utpakking
+    "Har returløsning", "Avstand innlevering", "Beskjed retur mottatt", "Beskjed retur tidspunkt",  # Steg 7 - Retur
+    "Dato refusjon", "Fikk beskjed refusjon",  # Steg 8 - Pengene tilbake
+]
+TESTKJOP_HEADER = TESTKJOP_FELLES_KOLONNER + TESTKJOP_STEG_KOLONNER + ["Sist endret"]
+
+TESTKJOP_KUNDESERVICE_FANE = "Testkjøp-kundeservice"
+TESTKJOP_KUNDESERVICE_HEADER = [
+    "Butikk", "Jurymedlem", "Kanal", "Spørsmål stilt", "Tidspunkt sendt", "Tidspunkt svar mottatt", "Kvalitet", "Sist endret",
+]
+
+APPINNSTILLINGER_FANE = "Appinnstillinger"
+APPINNSTILLINGER_HEADER = ["Nøkkel", "Verdi"]
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def read_testkjop_tildeling(_sh):
+    """{jurymedlem: set(butikk)} – hvilke butikker hvert jurymedlem skal
+    gjennomføre testkjøp hos."""
+    ws = hent_eller_lag_fane(_sh, TESTKJOP_TILDELING_FANE, TESTKJOP_TILDELING_HEADER)
+    resultat = {}
+    for r in ws.get_all_records():
+        navn = str(r.get("Jurymedlem", "")).strip()
+        butikk = str(r.get("Butikk", "")).strip()
+        if navn and butikk:
+            resultat.setdefault(navn, set()).add(butikk)
+    return resultat
+
+
+def write_testkjop_tildeling(sh, jurymedlem, butikker_valgt):
+    """Skriver om HELE fanen med oppdatert tildeling for ÉN person – andre
+    personers rader beholdes uendret. Ett samlet skriv (fanen er uansett
+    liten, typisk noen titalls rader totalt)."""
+    ws = hent_eller_lag_fane(sh, TESTKJOP_TILDELING_FANE, TESTKJOP_TILDELING_HEADER)
+    alle = read_testkjop_tildeling(sh)
+    alle[jurymedlem] = set(butikker_valgt)
+    rader = [TESTKJOP_TILDELING_HEADER]
+    for navn in sorted(alle):
+        for butikk in sorted(alle[navn]):
+            rader.append([navn, butikk])
+    ws.clear()
+    ws.update(rader)
+    read_testkjop_tildeling.clear()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def read_testkjop(_sh):
+    """{(butikk, jurymedlem): {steg: {kolonnenavn: verdi, ...}}} – hele
+    Testkjøp-fanen strukturert for rask oppslag. Kort TTL (30s, ikke de
+    vanlige 10 minuttene) siden dette endres ofte mens et testkjøp pågår,
+    og lagring her bevisst IKKE tømmer hele appens cache (se
+    write_testkjop_steg)."""
+    ws = hent_eller_lag_fane(_sh, TESTKJOP_FANE, TESTKJOP_HEADER)
+    resultat = {}
+    for r in ws.get_all_records():
+        butikk = str(r.get("Butikk", "")).strip()
+        jurymedlem = str(r.get("Jurymedlem", "")).strip()
+        steg = str(r.get("Steg", "")).strip()
+        if not (butikk and jurymedlem and steg):
+            continue
+        resultat.setdefault((butikk, jurymedlem), {})[steg] = dict(r)
+    return resultat
+
+
+def write_testkjop_steg(sh, butikk, jurymedlem, steg, felter):
+    """Lagrer ÉTT steg for ÉN butikk+jurymedlem – oppdaterer raden hvis den
+    finnes fra før, ellers legger til en ny. ÉTT skrivekall (én
+    sammenhengende rad i ett update()-kall, ikke flere separate celler).
+    Tømmer KUN denne fanens egen cache – bevisst IKKE resten av appens
+    mellomlagring (se brief), siden et testkjøp kan pågå over flere dager
+    og andre sider ikke trenger å bli tregere av den grunn."""
+    ws = hent_eller_lag_fane(sh, TESTKJOP_FANE, TESTKJOP_HEADER)
+    rader = ws.get_all_values()
+    rad_nr = None
+    for i, rad in enumerate(rader[1:], start=2):
+        if len(rad) >= 3 and rad[0].strip() == butikk and rad[1].strip() == jurymedlem and rad[2].strip() == steg:
+            rad_nr = i
+            break
+    if rad_nr is None:
+        rad_nr = max(len(rader) + 1, 2)
+        if rad_nr > ws.row_count:
+            ws.add_rows(rad_nr - ws.row_count + 20)
+
+    verdier = {"Butikk": butikk, "Jurymedlem": jurymedlem, "Steg": steg, "Sist endret": naa_norsk().strftime("%Y-%m-%d %H:%M")}
+    verdier.update(felter)
+    rad_ut = [str(verdier.get(kol, "")) for kol in TESTKJOP_HEADER]
+    siste_bokstav = gspread.utils.rowcol_to_a1(1, len(TESTKJOP_HEADER)).rstrip("0123456789")
+    ws.update([rad_ut], range_name=f"A{rad_nr}:{siste_bokstav}{rad_nr}")
+    read_testkjop.clear()
+
+
+@st.cache_data(ttl=30, show_spinner=False)
+def read_testkjop_kundeservice(_sh):
+    """{(butikk, jurymedlem): [kanal-rad, ...]} – én liste per butikk som
+    kan ha flere kundeservice-kanaler registrert."""
+    ws = hent_eller_lag_fane(_sh, TESTKJOP_KUNDESERVICE_FANE, TESTKJOP_KUNDESERVICE_HEADER)
+    resultat = {}
+    for r in ws.get_all_records():
+        butikk = str(r.get("Butikk", "")).strip()
+        jurymedlem = str(r.get("Jurymedlem", "")).strip()
+        kanal = str(r.get("Kanal", "")).strip()
+        if not (butikk and jurymedlem and kanal):
+            continue
+        resultat.setdefault((butikk, jurymedlem), []).append(dict(r))
+    return resultat
+
+
+def write_testkjop_kundeservice_kanal(sh, butikk, jurymedlem, kanal, felter):
+    """Lagrer ÉN kundeservice-kanal – oppdaterer raden for SAMME kanaltype
+    hvis den alt finnes for denne butikken+jurymedlemmet (antar at hver
+    kanaltype kun brukes én gang per testkjøp), ellers legger til en ny
+    rad. Ett skrivekall, tømmer kun egen cache (se write_testkjop_steg)."""
+    ws = hent_eller_lag_fane(sh, TESTKJOP_KUNDESERVICE_FANE, TESTKJOP_KUNDESERVICE_HEADER)
+    rader = ws.get_all_values()
+    rad_nr = None
+    for i, rad in enumerate(rader[1:], start=2):
+        if len(rad) >= 3 and rad[0].strip() == butikk and rad[1].strip() == jurymedlem and rad[2].strip() == kanal:
+            rad_nr = i
+            break
+    if rad_nr is None:
+        rad_nr = max(len(rader) + 1, 2)
+        if rad_nr > ws.row_count:
+            ws.add_rows(rad_nr - ws.row_count + 20)
+
+    verdier = {"Butikk": butikk, "Jurymedlem": jurymedlem, "Kanal": kanal, "Sist endret": naa_norsk().strftime("%Y-%m-%d %H:%M")}
+    verdier.update(felter)
+    rad_ut = [str(verdier.get(kol, "")) for kol in TESTKJOP_KUNDESERVICE_HEADER]
+    siste_bokstav = gspread.utils.rowcol_to_a1(1, len(TESTKJOP_KUNDESERVICE_HEADER)).rstrip("0123456789")
+    ws.update([rad_ut], range_name=f"A{rad_nr}:{siste_bokstav}{rad_nr}")
+    read_testkjop_kundeservice.clear()
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def read_appinnstilling(_sh, nokkel):
+    """Enkel nøkkel/verdi-oppslag for appinnstillinger som ikke hører
+    hjemme noe annet sted (f.eks. lenke til masterpresentasjon) - lagret i
+    en egen, minimal fane i stedet for en fast fil, siden regnearket ER
+    fasiten for alt appen leser/skriver."""
+    ws = hent_eller_lag_fane(_sh, APPINNSTILLINGER_FANE, APPINNSTILLINGER_HEADER)
+    for r in ws.get_all_records():
+        if str(r.get("Nøkkel", "")).strip() == nokkel:
+            return str(r.get("Verdi", "")).strip()
+    return ""
+
+
+def skriv_appinnstilling(sh, nokkel, verdi):
+    ws = hent_eller_lag_fane(sh, APPINNSTILLINGER_FANE, APPINNSTILLINGER_HEADER)
+    rader = ws.get_all_values()
+    rad_nr = None
+    for i, rad in enumerate(rader[1:], start=2):
+        if len(rad) >= 1 and rad[0].strip() == nokkel:
+            rad_nr = i
+            break
+    if rad_nr is None:
+        rad_nr = max(len(rader) + 1, 2)
+    ws.update([[nokkel, verdi]], range_name=f"A{rad_nr}:B{rad_nr}")
+    read_appinnstilling.clear()

@@ -12,7 +12,10 @@ from jury import (
     aktiv_fase, aktive_kriterier, kriterier_per_fagfelt, oppdater_veiledning_rad, read_criteria, read_faser,
     read_jury, read_veiledning, sett_gjeldende_fase, slett_jurymedlem, write_jury,
 )
-from sheets import fane_oversikt, read_fase1_scores, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger
+from sheets import (
+    fane_oversikt, read_appinnstilling, read_fase1_scores, read_generelle_kommentarer, read_ratings, read_stores,
+    read_testkjop_tildeling, read_vurderinger, skriv_appinnstilling, write_testkjop_tildeling,
+)
 from theme import FAGFELT_FARGE
 
 topptekst("Innstillinger")
@@ -28,10 +31,13 @@ if not sh:
 try:
     alle_kriterier = read_criteria(sh)
     jury = read_jury(sh)
+    alle_butikker, _ = read_stores(sh)
+    testkjop_tildeling = read_testkjop_tildeling(sh)
 except Exception as e:
-    alle_kriterier, jury = [], {}
+    alle_kriterier, jury, alle_butikker, testkjop_tildeling = [], {}, {}, {}
     vis_feil("Kunne ikke lese jury/kriterier", e)
 
+navn_liste_butikker = sorted(alle_butikker.keys())
 kriterier_fase3 = aktive_kriterier(alle_kriterier, fase="Fase 3")
 felt_dict = kriterier_per_fagfelt(kriterier_fase3)
 navn_liste_jury = sorted(jury.keys())
@@ -90,6 +96,12 @@ def jury_dialog(redigerer_navn=None):
             if st.checkbox(k, key=chk_nokkel):
                 nye_valgt.add(k)
 
+    st.divider()
+    mine_testkjop_butikker = testkjop_tildeling.get(redigerer_navn, set()) if redigerer_navn else set()
+    valgte_testkjop_butikker = st.multiselect(
+        "Testkjøp-butikker", navn_liste_butikker, default=sorted(mine_testkjop_butikker), key=f"testkjop_butikker_{dialog_id}",
+    )
+
     c1, c2 = st.columns(2)
     if c1.button("Avbryt", use_container_width=True):
         st.rerun()
@@ -102,6 +114,7 @@ def jury_dialog(redigerer_navn=None):
         else:
             try:
                 write_jury(sh, navn_rengjort, nye_valgt, eksisterende.get("epost", ""), eksisterende.get("farge", ""))
+                write_testkjop_tildeling(sh, navn_rengjort, set(valgte_testkjop_butikker))
                 st.toast("Lagret", icon=":material/check_circle:")
                 st.session_state["_jury_dialog_for"] = None
                 st.rerun()
@@ -273,3 +286,20 @@ if bc2.button(
     fane_oversikt.clear()
     st.toast("Hentet siste versjon fra regnearket.", icon=":material/check_circle:")
     st.rerun()
+
+try:
+    _masterpresentasjon_lenke = read_appinnstilling(sh, "Lenke til masterpresentasjon")
+except Exception as e:
+    _masterpresentasjon_lenke = ""
+    vis_feil("Kunne ikke lese lenken til masterpresentasjonen", e)
+
+mc1, mc2 = st.columns([4, 1])
+_ny_lenke = mc1.text_input("Lenke til masterpresentasjon", value=_masterpresentasjon_lenke)
+if mc2.button("Lagre", icon=":material/save:", key="lagre_masterpresentasjon", use_container_width=True):
+    try:
+        skriv_appinnstilling(sh, "Lenke til masterpresentasjon", _ny_lenke.strip())
+    except Exception as e:
+        vis_feil("Kunne ikke lagre lenken", e)
+    else:
+        st.toast("Lagret", icon=":material/check_circle:")
+        st.rerun()

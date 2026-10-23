@@ -292,3 +292,39 @@ def regneark_tabell(butikker: dict, ratings: dict, kriterier_per_fagfelt: dict, 
     )
 
 
+
+
+def kopier_knapp(tekst: str, label: str = "Kopier oppsummering"):
+    """Egen kopier-til-utklippstavle-knapp – Streamlit har ingen innebygd
+    variant med egen synlig knappetekst (kun st.code sitt automatiske
+    hover-kopiikon). Bruker navigator.clipboard (krever HTTPS – Streamlit
+    Cloud bruker alltid dette, så ingen fallback nødvendig)."""
+    import html as _html
+
+    import streamlit.components.v1 as components
+
+    innhold = _html.escape(tekst)
+    knappetekst = _html.escape(label)
+    components.html(
+        f"""
+        <textarea id="kopier-kilde" style="position:absolute;left:-9999px;top:-9999px;">{innhold}</textarea>
+        <button id="kopier-knapp" style="
+            background:#00703C;color:white;border:none;border-radius:8px;
+            padding:8px 16px;font-family:Inter,-apple-system,sans-serif;font-size:14px;
+            font-weight:600;cursor:pointer;">
+            {knappetekst}
+        </button>
+        <script>
+        document.getElementById('kopier-knapp').addEventListener('click', function() {{
+            var ta = document.getElementById('kopier-kilde');
+            navigator.clipboard.writeText(ta.value).then(function() {{
+                var btn = document.getElementById('kopier-knapp');
+                var opprinnelig = btn.innerText;
+                btn.innerText = 'Kopiert ✓';
+                setTimeout(function() {{ btn.innerText = opprinnelig; }}, 1500);
+            }});
+        }});
+        </script>
+        """,
+        height=48,
+    )

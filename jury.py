@@ -642,3 +642,83 @@ def sett_gjeldende_fase(sh, fase_nummer):
     if oppdateringer:
         ws.batch_update(oppdateringer)
     read_faser.clear()
+
+
+# ─────────────────────────────────────────────
+# Testkjøp – status, tidsavvik og andre utledede nøkkeltall
+# ─────────────────────────────────────────────
+from datetime import datetime as _datetime  # noqa: E402
+
+TESTKJOP_STATUSER = [
+    "Ikke startet", "Bestilt", "Venter på levering", "Levert", "Retur sendt", "Venter på refusjon", "Ferdig",
+]
+
+
+def beregn_testkjop_status(steg_data: dict) -> str:
+    """steg_data: {steg: {kolonnenavn: verdi}} for ÉN butikk+jurymedlem
+    (fra sheets.read_testkjop). Utleder status fra hvilke av de 8
+    tidslinje-stegene som er fylt ut så langt.
+
+    «Retur sendt» vs. «Venter på refusjon» skilles på om steg «Retur» sin
+    «Beskjed retur mottatt» er besvart Ja (butikken har da bekreftet at de
+    har mottatt returen - man venter nå SPESIFIKT på selve refusjonen,
+    ikke lenger på at pakken skal komme frem)."""
+    if "Pengene tilbake" in steg_data:
+        return "Ferdig"
+    if "Retur" in steg_data:
+        if str(steg_data["Retur"].get("Beskjed retur mottatt", "")).strip().lower() == "ja":
+            return "Venter på refusjon"
+        return "Retur sendt"
+    if "Utpakking" in steg_data or "Levering" in steg_data:
+        return "Levert"
+    if "Kommunikasjon" in steg_data:
+        return "Venter på levering"
+    if "Før kjøp" in steg_data or "Kassen" in steg_data:
+        return "Bestilt"
+    return "Ikke startet"
+
+
+def _parse_dato(tekst):
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%d"):
+        try:
+            return _datetime.strptime(tekst.strip(), fmt)
+        except (ValueError, AttributeError):
+            continue
+    return None
+
+
+def beregn_leveringsavvik(lovet_dato: str, faktisk_dato: str):
+    """«2 dager forsinket» / «Levert som lovet» / «1 dag tidligere» - None
+    hvis en av datoene mangler eller ikke lar seg tolke."""
+    lovet, faktisk = _parse_dato(lovet_dato), _parse_dato(faktisk_dato)
+    if not lovet or not faktisk:
+        return None
+    avvik = (faktisk.date() - lovet.date()).days
+    if avvik == 0:
+        return "Levert som lovet"
+    if avvik > 0:
+        return f"{avvik} dag{'er' if avvik != 1 else ''} forsinket"
+    return f"{-avvik} dag{'er' if avvik != -1 else ''} tidligere"
+
+
+def beregn_svartid(tidspunkt_sendt: str, tidspunkt_mottatt: str):
+    """Lesbar varighet («2t 15min», «45min») mellom to tidspunkt, eller
+    None hvis en av dem mangler/ikke lar seg tolke."""
+    sendt, mottatt = _parse_dato(tidspunkt_sendt), _parse_dato(tidspunkt_mottatt)
+    if not sendt or not mottatt or mottatt < sendt:
+        return None
+    minutter = int((mottatt - sendt).total_seconds() // 60)
+    timer, rest = divmod(minutter, 60)
+    if timer:
+        return f"{timer}t {rest}min"
+    return f"{rest}min"
+
+
+def beregn_dager_til_refusjon(retur_tidspunkt: str, dato_refusjon: str):
+    """Antall dager fra returen ble registrert sendt (steg «Retur» sitt eget
+    Tidspunkt - brukes som beste tilgjengelige anslag på innleverings-
+    tidspunktet) til refusjonen kom. None hvis en av datoene mangler."""
+    retur, refusjon = _parse_dato(retur_tidspunkt), _parse_dato(dato_refusjon)
+    if not retur or not refusjon:
+        return None
+    return (refusjon.date() - retur.date()).days
