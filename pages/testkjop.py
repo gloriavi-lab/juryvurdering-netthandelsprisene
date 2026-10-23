@@ -9,10 +9,7 @@ import streamlit as st
 
 from components import kopier_knapp, topptekst, tom_tilstand, vis_feil
 from data import naa_norsk
-from jury import (
-    beregn_dager_til_refusjon, beregn_leveringsavvik, beregn_svartid, beregn_testkjop_status, read_jury,
-    read_testkjop_veiledning,
-)
+from jury import beregn_dager_til_refusjon, beregn_leveringsavvik, beregn_svartid, beregn_testkjop_status, read_jury
 from sheets import (
     read_appinnstilling, read_stores, read_testkjop, read_testkjop_kundeservice, read_testkjop_tildeling,
     write_testkjop_kundeservice_kanal, write_testkjop_steg,
@@ -38,23 +35,7 @@ except Exception as e:
 _masterpresentasjon = read_appinnstilling(sh, "Lenke til masterpresentasjon")
 if _masterpresentasjon:
     st.link_button("Åpne masterpresentasjonen", _masterpresentasjon, icon=":material/slideshow:")
-
-st.divider()
-st.subheader("Slik gjennomfører du et testkjøp", anchor=False)
-try:
-    veiledning = read_testkjop_veiledning(sh)
-except Exception as e:
-    veiledning = []
-    vis_feil("Kunne ikke lese veiledningen", e)
-if veiledning:
-    for rad in veiledning:
-        overskrift, tekst = rad.get("Overskrift", ""), rad.get("Tekst", "")
-        if overskrift:
-            st.markdown(f"**{overskrift}**  \n{tekst}")
-else:
-    tom_tilstand("📋", "Fant ingen veiledningstekst", "Sjekk fanen «Testkjøp-veiledning» i regnearket.")
-
-st.divider()
+    st.divider()
 
 navn_liste_jury = sorted(jury.keys())
 if not navn_liste_jury:
