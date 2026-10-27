@@ -107,15 +107,17 @@ st.write("")
 
 TIDSLINJE_STEG = ["Før kjøp", "Kassen", "Kommunikasjon", "Levering", "Utpakking", "Kundeservice", "Retur", "Pengene tilbake"]
 
-# ── Tidslinje: 8 klikkbare steg ──
-steg_kolonner = st.columns(8)
-for i, steg in enumerate(TIDSLINJE_STEG):
-    ferdig = steg in alle_steg
-    merke = "✓" if ferdig else str(i + 1)
-    with steg_kolonner[i]:
-        if st.button(merke, key=f"tidslinje_{steg}", help=steg, use_container_width=True, type="primary" if ferdig else "secondary"):
-            st.session_state["_tk_apent_steg"] = steg
-            st.rerun()
+# ── Tidslinje: 8 klikkbare steg, radvis (ny kolonnerad per 4 – holder rekkefølgen riktig når kolonnene stables på mobil) ──
+for rad_start in range(0, len(TIDSLINJE_STEG), 4):
+    steg_kolonner = st.columns(4)
+    for j, steg in enumerate(TIDSLINJE_STEG[rad_start:rad_start + 4]):
+        i = rad_start + j
+        ferdig = steg in alle_steg
+        merke = f"✓ {steg}" if ferdig else f"{i + 1}. {steg}"
+        with steg_kolonner[j]:
+            if st.button(merke, key=f"tidslinje_{steg}", use_container_width=True, type="primary" if ferdig else "secondary"):
+                st.session_state["_tk_apent_steg"] = steg
+                st.rerun()
 _apent_steg = st.session_state.get("_tk_apent_steg")
 if _apent_steg:
     st.caption(f"Åpent steg: **{_apent_steg}**")
