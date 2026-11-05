@@ -656,7 +656,7 @@ TESTKJOP_STATUSER = [
 
 def beregn_testkjop_status(steg_data: dict) -> str:
     """steg_data: {steg: {kolonnenavn: verdi}} for ÉN butikk+jurymedlem
-    (fra sheets.read_testkjop). Utleder status fra hvilke av de 8
+    (fra sheets.read_testkjop). Utleder status fra hvilke av
     tidslinje-stegene som er fylt ut så langt.
 
     «Retur sendt» vs. «Venter på refusjon» skilles på om steg «Retur» sin
@@ -673,7 +673,7 @@ def beregn_testkjop_status(steg_data: dict) -> str:
         return "Levert"
     if "Kommunikasjon" in steg_data:
         return "Venter på levering"
-    if "Før kjøp" in steg_data or "Kassen" in steg_data:
+    if "Kassen" in steg_data:
         return "Bestilt"
     return "Ikke startet"
 

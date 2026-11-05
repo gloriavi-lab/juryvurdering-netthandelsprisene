@@ -1,7 +1,10 @@
 """Side – Testkjøp. Jurymedlemmet gjennomfører et reelt kjøp hos tildelte
-butikker og logger funn steg for steg (8 steg i en tidslinje + 3
+butikker og logger funn steg for steg (7 steg i en tidslinje + 2
 tverrgående vurderinger). Hvert steg lagres for seg (ett skrivekall per
-lagring, se sheets.write_testkjop_steg) – ikke én stor skjema-innsending."""
+lagring, se sheets.write_testkjop_steg) – ikke én stor skjema-innsending.
+
+Alt lagres per (butikk, jurymedlem), så to jurymedlemmer kan testkjøpe hos
+samme butikk uten å overskrive hverandre – de får hver sin egen tidslinje."""
 
 from datetime import datetime as _datetime
 
@@ -105,9 +108,9 @@ with dc2:
 
 st.write("")
 
-TIDSLINJE_STEG = ["Før kjøp", "Kassen", "Kommunikasjon", "Levering", "Utpakking", "Kundeservice", "Retur", "Pengene tilbake"]
+TIDSLINJE_STEG = ["Kassen", "Kommunikasjon", "Levering", "Utpakking", "Kundeservice", "Retur", "Pengene tilbake"]
 
-# ── Tidslinje: 8 klikkbare steg, radvis (ny kolonnerad per 4 – holder rekkefølgen riktig når kolonnene stables på mobil) ──
+# ── Tidslinje: klikkbare steg, radvis (ny kolonnerad per 4 – holder rekkefølgen riktig når kolonnene stables på mobil) ──
 for rad_start in range(0, len(TIDSLINJE_STEG), 4):
     steg_kolonner = st.columns(4)
     for j, steg in enumerate(TIDSLINJE_STEG[rad_start:rad_start + 4]):
@@ -179,15 +182,10 @@ def _render_felt(feltnavn, typ, label, key_prefix, eksisterende):
 
 
 STEG_FELT_SPEC = {
-    "Før kjøp": [("Info om levering vist", "ja_nei", "Informasjon om levering vist før kassen? (et pluss hvis ja)")],
     "Kassen": [
-        ("Antall leveringsalternativer", "number", "Antall leveringsalternativer"),
-        ("Relevante alternativer", "ja_delvis_nei", "Relevante alternativer?"),
         ("ETA vist", "ja_nei", "ETA vist?"),
         ("Lovet leveringsdato", "date", "Lovet leveringsdato"),
-        ("Betalingsmåter", "text", "Betalingsmåter"),
         ("Måtte opprette konto", "ja_nei", "Måtte opprette konto?"),
-        ("Forhåndsavkrysset samtykke", "ja_nei", "Forhåndsavkryssede samtykker?"),
         ("Totalpris vist", "ja_nei", "Totalpris vist før betaling?"),
     ],
     "Kommunikasjon": [
@@ -234,7 +232,10 @@ def _render_generisk_steg(steg):
             if dager is not None:
                 st.info(f"{dager} dag{'er' if dager != 1 else ''} fra innlevering til refusjon.", icon=":material/payments:")
 
-    tidspunkt = _tidspunkt_widgets(f"{key_prefix}_tidspunkt", eksisterende.get("Tidspunkt", ""))
+    # «Pengene tilbake» har ikke eget tidspunkt – feltet «Dato for refusjon»
+    # under er det eneste tidspunktet som er relevant for det steget.
+    viser_tidspunkt = steg != "Pengene tilbake"
+    tidspunkt = _tidspunkt_widgets(f"{key_prefix}_tidspunkt", eksisterende.get("Tidspunkt", "")) if viser_tidspunkt else ""
     score = _score_widget(f"{key_prefix}_score", eksisterende.get("Score", ""))
 
     felter = {}
@@ -246,7 +247,8 @@ def _render_generisk_steg(steg):
     kommentar = st.text_area("Kommentar", value=eksisterende.get("Kommentar", ""), key=f"{key_prefix}_kommentar")
 
     if st.button("Lagre steg", type="primary", icon=":material/save:", key=f"{key_prefix}_lagre"):
-        felter["Tidspunkt"] = tidspunkt
+        if viser_tidspunkt:
+            felter["Tidspunkt"] = tidspunkt
         felter["Score"] = score
         felter["Kommentar"] = kommentar
         try:
@@ -325,9 +327,9 @@ st.divider()
 
 # ── Tverrgående: eget lite skjema per butikk ──
 st.subheader("Tverrgående vurdering", anchor=False)
-TVERRGAENDE_STEG = ["Mobilopplevelse", "Compliance", "Universell utforming"]
+TVERRGAENDE_STEG = ["Compliance", "Universell utforming"]
 tverrgaende_verdier = {}
-tv_kolonner = st.columns(3)
+tv_kolonner = st.columns(len(TVERRGAENDE_STEG))
 for i, steg in enumerate(TVERRGAENDE_STEG):
     eksisterende = alle_steg.get(steg, {})
     key_prefix = f"tk_{apnet_butikk}_{jurynavn}_{steg}".replace(" ", "_")
@@ -361,7 +363,8 @@ def _bygg_oppsummering_tekst():
     for steg in TIDSLINJE_STEG:
         d = alle_steg.get(steg)
         if d:
-            linjer.append(f"  ✓ {steg} – {d.get('Tidspunkt', '')} – Score: {d.get('Score', '–')}")
+            nar = f" – {d['Tidspunkt']}" if d.get("Tidspunkt") else ""
+            linjer.append(f"  ✓ {steg}{nar} – Score: {d.get('Score', '–')}")
         else:
             linjer.append(f"  ○ {steg} – ikke utført")
     linjer.append("")

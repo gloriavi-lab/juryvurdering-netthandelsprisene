@@ -1770,22 +1770,20 @@ TESTKJOP_TILDELING_HEADER = ["Jurymedlem", "Butikk"]
 TESTKJOP_FANE = "Testkjøp"
 # De 8 stegene som vises i selve tidslinjen, i rekkefølge.
 TESTKJOP_TIDSLINJE_STEG = [
-    "Før kjøp", "Kassen", "Kommunikasjon", "Levering", "Utpakking", "Kundeservice", "Retur", "Pengene tilbake",
+    "Kassen", "Kommunikasjon", "Levering", "Utpakking", "Kundeservice", "Retur", "Pengene tilbake",
 ]
 # Tverrgående – eget lite skjema per butikk, IKKE del av tidslinjen.
-TESTKJOP_TVERRGAENDE_STEG = ["Mobilopplevelse", "Compliance", "Universell utforming"]
+TESTKJOP_TVERRGAENDE_STEG = ["Compliance", "Universell utforming"]
 TESTKJOP_FELLES_KOLONNER = ["Butikk", "Jurymedlem", "Steg", "Tidspunkt", "Score", "Kommentar"]
 # Steg-spesifikke kolonner, én kolonne per felt beskrevet i brief - kun den
 # aktuelle radens eget steg fyller ut "sine" kolonner, resten står tomme.
 TESTKJOP_STEG_KOLONNER = [
-    "Info om levering vist",  # Steg 1 - Før kjøp
-    "Antall leveringsalternativer", "Relevante alternativer", "ETA vist", "Lovet leveringsdato",
-    "Betalingsmåter", "Måtte opprette konto", "Forhåndsavkrysset samtykke", "Totalpris vist",  # Steg 2 - Kassen
-    "Ordrebekreftelse mottatt", "Info om retur", "Mersalg", "Råd og tips",  # Steg 3 - Kommunikasjon
-    "Faktisk leveringsdato",  # Steg 4 - Levering
-    "Emballasje", "Produkt som beskrevet", "Returinfo i pakken",  # Steg 5 - Utpakking
-    "Har returløsning", "Avstand innlevering", "Beskjed retur mottatt", "Beskjed retur tidspunkt",  # Steg 7 - Retur
-    "Dato refusjon", "Fikk beskjed refusjon",  # Steg 8 - Pengene tilbake
+    "ETA vist", "Lovet leveringsdato", "Måtte opprette konto", "Totalpris vist",  # Steg 1 - Kassen
+    "Ordrebekreftelse mottatt", "Info om retur", "Mersalg", "Råd og tips",  # Steg 2 - Kommunikasjon
+    "Faktisk leveringsdato",  # Steg 3 - Levering
+    "Emballasje", "Produkt som beskrevet", "Returinfo i pakken",  # Steg 4 - Utpakking
+    "Har returløsning", "Avstand innlevering", "Beskjed retur mottatt", "Beskjed retur tidspunkt",  # Steg 6 - Retur
+    "Dato refusjon", "Fikk beskjed refusjon",  # Steg 7 - Pengene tilbake
 ]
 TESTKJOP_HEADER = TESTKJOP_FELLES_KOLONNER + TESTKJOP_STEG_KOLONNER + ["Sist endret"]
 
@@ -1868,8 +1866,12 @@ def write_testkjop_steg(sh, butikk, jurymedlem, steg, felter):
 
     verdier = {"Butikk": butikk, "Jurymedlem": jurymedlem, "Steg": steg, "Sist endret": naa_norsk().strftime("%Y-%m-%d %H:%M")}
     verdier.update(felter)
-    rad_ut = [str(verdier.get(kol, "")) for kol in TESTKJOP_HEADER]
-    siste_bokstav = gspread.utils.rowcol_to_a1(1, len(TESTKJOP_HEADER)).rstrip("0123456789")
+    # Skriv etter fanens EGEN overskriftsrad, ikke etter konstanten – ellers
+    # havner verdiene i feil kolonne i regneark som ble opprettet før et felt
+    # ble lagt til eller fjernet. Felt som ikke finnes lenger skrives tomme.
+    fane_header = rader[0] if rader and rader[0] else TESTKJOP_HEADER
+    rad_ut = [str(verdier.get(kol, "")) for kol in fane_header]
+    siste_bokstav = gspread.utils.rowcol_to_a1(1, len(fane_header)).rstrip("0123456789")
     ws.update([rad_ut], range_name=f"A{rad_nr}:{siste_bokstav}{rad_nr}")
     read_testkjop.clear()
 
