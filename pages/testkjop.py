@@ -387,7 +387,12 @@ def _bygg_oppsummering_tekst():
     if dager is not None:
         linjer.append(f"Dager til refusjon: {dager}")
 
-    scorer = [float(d["Score"]) for d in alle_steg.values() if d.get("Score", "").replace(".", "", 1).isdigit()]
+    # Kun steg som fortsatt finnes – gamle rader fra fjernede steg skal ikke
+    # dra snittet i noen retning.
+    scorer = [
+        float(d["Score"]) for steg in TIDSLINJE_STEG + TVERRGAENDE_STEG
+        if (d := alle_steg.get(steg)) and d.get("Score", "").replace(".", "", 1).isdigit()
+    ]
     if scorer:
         linjer.append(f"Snitt score (alle steg): {sum(scorer) / len(scorer):.1f}")
 
