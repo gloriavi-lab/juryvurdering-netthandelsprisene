@@ -18,6 +18,7 @@ import streamlit as st
 from components import kopier_knapp, topptekst, tom_tilstand, vis_feil
 from data import naa_norsk
 from jury import beregn_dager_til_refusjon, beregn_leveringsavvik, beregn_svartid, beregn_testkjop_status, read_jury
+from pptx_eksport import bygg_testkjop_slide
 from sheets import (
     read_appinnstilling, read_stores, read_testkjop, read_testkjop_kundeservice, read_testkjop_tildeling,
     slett_testkjop_kundeservice_kanal, write_testkjop_kundeservice_kanal, write_testkjop_steg,
@@ -389,7 +390,42 @@ st.divider()
 st.subheader("Oppsummering", anchor=False)
 
 
-def _bygg_oppsummering_tekst():
+def _beregn_nokkeltall():
+    """(liste av (etikett, verdi)-par, rødt_flagg) – delt mellom
+    tekstoppsummeringen og PowerPoint-eksporten, så beregningen kun skjer
+    ett sted."""
+    linjer = []
+    kjop = alle_steg.get("Kjøp og levering", {})
+    avvik = beregn_leveringsavvik(kjop.get("Lovet leveringsdato", ""), kjop.get("Faktisk leveringsdato", ""))
+    if avvik:
+        linjer.append(("Leveringsavvik", avvik))
+
+    kanaler = kundeservice_data.get((apnet_butikk, jurynavn), [])
+    for k in kanaler:
+        svartid = beregn_svartid(k.get("Tidspunkt sendt", ""), k.get("Tidspunkt svar mottatt", ""))
+        if svartid:
+            linjer.append((f"Svartid ({k.get('Kanal', '')})", svartid))
+
+    retur = alle_steg.get("Retur", {})
+    pengene = alle_steg.get("Pengene tilbake", {})
+    dager = beregn_dager_til_refusjon(retur.get("Tidspunkt", ""), pengene.get("Dato refusjon", ""))
+    if dager is not None:
+        linjer.append(("Dager til refusjon", f"{dager} dag{'er' if dager != 1 else ''}"))
+
+    # Kun steg som fortsatt finnes – gamle rader fra fjernede steg skal ikke
+    # dra snittet i noen retning.
+    scorer = [
+        float(d["Score"]) for steg in TIDSLINJE_STEG
+        if (d := alle_steg.get(steg)) and d.get("Score", "").replace(".", "", 1).isdigit()
+    ]
+    if scorer:
+        linjer.append(("Snitt score (alle steg)", f"{sum(scorer) / len(scorer):.1f}"))
+
+    rodt_flagg = retur.get("Har returløsning") == "Nei, kunden må ordne selv"
+    return linjer, rodt_flagg
+
+
+def _bygg_oppsummering_tekst(nokkeltall, rodt_flagg):
     linjer = [f"TESTKJØP – {apnet_butikk} ({jurynavn})", f"Status: {status}", ""]
 
     generell = alle_steg.get("Generell kommentar", {}).get("Kommentar", "")
@@ -407,33 +443,10 @@ def _bygg_oppsummering_tekst():
             linjer.append(f"  ○ {steg} – ikke utført")
     linjer.append("")
 
-    kjop = alle_steg.get("Kjøp og levering", {})
-    avvik = beregn_leveringsavvik(kjop.get("Lovet leveringsdato", ""), kjop.get("Faktisk leveringsdato", ""))
-    if avvik:
-        linjer.append(f"Leveringsavvik: {avvik}")
+    for etikett, verdi in nokkeltall:
+        linjer.append(f"{etikett}: {verdi}")
 
-    kanaler = kundeservice_data.get((apnet_butikk, jurynavn), [])
-    for k in kanaler:
-        svartid = beregn_svartid(k.get("Tidspunkt sendt", ""), k.get("Tidspunkt svar mottatt", ""))
-        if svartid:
-            linjer.append(f"Svartid ({k.get('Kanal', '')}): {svartid}")
-
-    retur = alle_steg.get("Retur", {})
-    pengene = alle_steg.get("Pengene tilbake", {})
-    dager = beregn_dager_til_refusjon(retur.get("Tidspunkt", ""), pengene.get("Dato refusjon", ""))
-    if dager is not None:
-        linjer.append(f"Dager til refusjon: {dager}")
-
-    # Kun steg som fortsatt finnes – gamle rader fra fjernede steg skal ikke
-    # dra snittet i noen retning.
-    scorer = [
-        float(d["Score"]) for steg in TIDSLINJE_STEG
-        if (d := alle_steg.get(steg)) and d.get("Score", "").replace(".", "", 1).isdigit()
-    ]
-    if scorer:
-        linjer.append(f"Snitt score (alle steg): {sum(scorer) / len(scorer):.1f}")
-
-    if retur.get("Har returløsning") == "Nei, kunden må ordne selv":
+    if rodt_flagg:
         linjer.append("🚩 RØDT FLAGG: Ingen returløsning – kunden må ordne returen selv.")
 
     linjer.append("")
@@ -446,6 +459,22 @@ def _bygg_oppsummering_tekst():
     return "\n".join(linjer)
 
 
-oppsummering_tekst = _bygg_oppsummering_tekst()
+_nokkeltall, _rodt_flagg = _beregn_nokkeltall()
+oppsummering_tekst = _bygg_oppsummering_tekst(_nokkeltall, _rodt_flagg)
 st.text(oppsummering_tekst)
-kopier_knapp(oppsummering_tekst)
+kc1, kc2 = st.columns(2)
+with kc1:
+    kopier_knapp(oppsummering_tekst)
+with kc2:
+    try:
+        pptx_bytes = bygg_testkjop_slide(
+            apnet_butikk, jurynavn, status, alle_steg, TIDSLINJE_STEG, _nokkeltall, _rodt_flagg,
+            generell_kommentar=alle_steg.get("Generell kommentar", {}).get("Kommentar", ""),
+        )
+        st.download_button(
+            "Last ned som PowerPoint", data=pptx_bytes, file_name=f"testkjop_{apnet_butikk}.pptx",
+            mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            icon=":material/slideshow:",
+        )
+    except Exception as e:
+        vis_feil("Kunne ikke lage PowerPoint-slide", e)
