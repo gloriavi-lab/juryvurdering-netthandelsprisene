@@ -659,19 +659,21 @@ def beregn_testkjop_status(steg_data: dict) -> str:
     (fra sheets.read_testkjop). Utleder status fra hvilke av
     tidslinje-stegene som er fylt ut så langt.
 
-    «Retur og refusjon» og «Kjøp og levering» er slåtte-sammen steg, så
-    status skilles på FELT innenfor samme steg-rad i stedet for på hvilke
-    separate steg som finnes:
-    - «Dato refusjon» utfylt i «Retur og refusjon» → Ferdig.
-    - Ellers, «Beskjed retur mottatt» = Ja → Venter på refusjon (butikken
-      har bekreftet mottatt retur, venter nå SPESIFIKT på selve refusjonen).
-    - Ellers → Retur sendt.
+    «Kjøp og levering» er ett slått-sammen steg (tidligere Kassen+Levering+
+    Utpakking) – status for DET skilles på om «Faktisk leveringsdato» er
+    utfylt, ikke på hvilke av de opprinnelige del-stegene som finnes.
+    «Retur» og «Pengene tilbake» er fortsatt to separate steg:
+    - «Pengene tilbake» finnes → Ferdig.
+    - Ellers, «Retur» finnes og «Beskjed retur mottatt» = Ja → Venter på
+      refusjon (butikken har bekreftet mottatt retur, venter nå
+      SPESIFIKT på selve refusjonen).
+    - Ellers, «Retur» finnes → Retur sendt.
     - «Faktisk leveringsdato» utfylt i «Kjøp og levering» → Levert,
       ellers → Bestilt."""
-    retur = steg_data.get("Retur og refusjon")
+    if "Pengene tilbake" in steg_data:
+        return "Ferdig"
+    retur = steg_data.get("Retur")
     if retur:
-        if retur.get("Dato refusjon"):
-            return "Ferdig"
         if str(retur.get("Beskjed retur mottatt", "")).strip().lower() == "ja":
             return "Venter på refusjon"
         return "Retur sendt"

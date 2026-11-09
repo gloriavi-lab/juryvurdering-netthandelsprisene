@@ -1,12 +1,12 @@
 """Side – Testkjøp. Jurymedlemmet gjennomfører et reelt kjøp hos tildelte
-butikker og logger funn steg for steg (4 steg i en tidslinje + én generell
+butikker og logger funn steg for steg (5 steg i en tidslinje + én generell
 kommentar om butikken). Hvert steg lagres for seg (ett skrivekall per
 lagring, se sheets.write_testkjop_steg) – ikke én stor skjema-innsending.
 
-«Kjøp og levering» og «Retur og refusjon» er bevisst slåtte-sammen steg
-(tidligere hhv. Kassen+Levering+Utpakking og Retur+Pengene tilbake) – se
-jury.beregn_testkjop_status for hvordan status utledes fra feltene
-INNENFOR disse.
+«Kjøp og levering» er bevisst et slått-sammen steg (tidligere Kassen+
+Levering+Utpakking) – se jury.beregn_testkjop_status for hvordan status
+utledes fra feltene INNENFOR det. Retur og Pengene tilbake er fortsatt to
+separate steg.
 
 Alt lagres per (butikk, jurymedlem), så to jurymedlemmer kan testkjøpe hos
 samme butikk uten å overskrive hverandre – de får hver sin egen tidslinje."""
@@ -132,7 +132,7 @@ if st.button("Lagre kommentar", icon=":material/save:", key=f"tk_{apnet_butikk}_
 
 st.divider()
 
-TIDSLINJE_STEG = ["Kjøp og levering", "Kommunikasjon", "Kundeservice", "Retur og refusjon"]
+TIDSLINJE_STEG = ["Kjøp og levering", "Kommunikasjon", "Kundeservice", "Retur", "Pengene tilbake"]
 
 # ── Tidslinje: klikkbare steg, radvis (ny kolonnerad per 4 – holder rekkefølgen riktig når kolonnene stables på mobil) ──
 for rad_start in range(0, len(TIDSLINJE_STEG), 4):
@@ -222,11 +222,13 @@ STEG_FELT_SPEC = {
         ("Mersalg", "ja_nei", "Mersalg?"),
         ("Råd og tips", "ja_nei", "Råd og tips?"),
     ],
-    "Retur og refusjon": [
+    "Retur": [
         ("Har returløsning", "returlosning", "Har returløsning?"),
         ("Avstand innlevering", "text", "Avstand til innleveringssted (km eller fritekst)"),
         ("Beskjed retur mottatt", "ja_nei", "Beskjed om at retur er mottatt?"),
         ("Beskjed retur tidspunkt", "tidspunkt", "Tidspunkt for beskjeden"),
+    ],
+    "Pengene tilbake": [
         ("Dato refusjon", "date", "Dato for refusjon"),
         ("Fikk beskjed refusjon", "ja_nei", "Fikk beskjed om refusjon?"),
     ],
@@ -244,17 +246,18 @@ def _render_generisk_steg(steg):
             avvik = beregn_leveringsavvik(lovet, faktisk_na)
             if avvik:
                 st.info(avvik, icon=":material/local_shipping:")
-    if steg == "Retur og refusjon":
-        retur_tidspunkt = eksisterende.get("Tidspunkt", "")
+    if steg == "Pengene tilbake":
+        retur_tidspunkt = alle_steg.get("Retur", {}).get("Tidspunkt", "")
         dato_refusjon_na = eksisterende.get("Dato refusjon", "")
         if retur_tidspunkt and dato_refusjon_na:
             dager = beregn_dager_til_refusjon(retur_tidspunkt, dato_refusjon_na)
             if dager is not None:
                 st.info(f"{dager} dag{'er' if dager != 1 else ''} fra innlevering til refusjon.", icon=":material/payments:")
 
-    # «Kommunikasjon» har ikke eget tidspunkt – feltet «Ordrebekreftelse
-    # mottatt» under er det eneste tidspunktet som er relevant der.
-    viser_tidspunkt = steg != "Kommunikasjon"
+    # «Kommunikasjon» og «Pengene tilbake» har ikke eget tidspunkt –
+    # «Ordrebekreftelse mottatt» / «Dato for refusjon» er det som er
+    # relevant der.
+    viser_tidspunkt = steg not in ("Kommunikasjon", "Pengene tilbake")
     tidspunkt = _tidspunkt_widgets(f"{key_prefix}_tidspunkt", eksisterende.get("Tidspunkt", "")) if viser_tidspunkt else ""
     score = _score_widget(f"{key_prefix}_score", eksisterende.get("Score", ""))
 
@@ -351,12 +354,12 @@ def _render_kundeservice_steg():
     st.divider()
     eksisterende = alle_steg.get("Kundeservice", {})
     key_prefix = f"tk_{apnet_butikk}_{jurynavn}_Kundeservice".replace(" ", "_")
-    tidspunkt = _tidspunkt_widgets(f"{key_prefix}_tidspunkt", eksisterende.get("Tidspunkt", ""))
+    # Ikke eget tidspunkt her – tiden fylles inn per kanal over (sendt/mottatt).
     score = _score_widget(f"{key_prefix}_score", eksisterende.get("Score", ""))
     kommentar = st.text_area("Kommentar (samlet vurdering av kundeservice)", value=eksisterende.get("Kommentar", ""), key=f"{key_prefix}_kommentar")
     if st.button("Lagre steg", type="primary", icon=":material/save:", key=f"{key_prefix}_lagre"):
         try:
-            write_testkjop_steg(sh, apnet_butikk, jurynavn, "Kundeservice", {"Tidspunkt": tidspunkt, "Score": score, "Kommentar": kommentar})
+            write_testkjop_steg(sh, apnet_butikk, jurynavn, "Kundeservice", {"Score": score, "Kommentar": kommentar})
         except Exception as e:
             vis_feil("Kunne ikke lagre steget", e)
         else:
@@ -409,8 +412,9 @@ def _bygg_oppsummering_tekst():
         if svartid:
             linjer.append(f"Svartid ({k.get('Kanal', '')}): {svartid}")
 
-    retur = alle_steg.get("Retur og refusjon", {})
-    dager = beregn_dager_til_refusjon(retur.get("Tidspunkt", ""), retur.get("Dato refusjon", ""))
+    retur = alle_steg.get("Retur", {})
+    pengene = alle_steg.get("Pengene tilbake", {})
+    dager = beregn_dager_til_refusjon(retur.get("Tidspunkt", ""), pengene.get("Dato refusjon", ""))
     if dager is not None:
         linjer.append(f"Dager til refusjon: {dager}")
 

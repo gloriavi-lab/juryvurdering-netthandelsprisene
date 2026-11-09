@@ -1769,21 +1769,20 @@ TESTKJOP_TILDELING_HEADER = ["Jurymedlem", "Butikk"]
 
 TESTKJOP_FANE = "Testkjøp"
 # Stegene som vises i selve tidslinjen, i rekkefølge. «Kjøp og levering»
-# dekker tidligere Kassen+Levering+Utpakking, «Retur og refusjon» dekker
-# tidligere Retur+Pengene tilbake – slått sammen til ett steg/én rad hver,
-# se jury.beregn_testkjop_status for hvordan status utledes fra feltene
-# INNENFOR disse slåtte-sammen stegene.
-TESTKJOP_TIDSLINJE_STEG = ["Kjøp og levering", "Kommunikasjon", "Kundeservice", "Retur og refusjon"]
+# dekker tidligere Kassen+Levering+Utpakking – slått sammen til ett
+# steg/én rad. Retur og Pengene tilbake er fortsatt TO separate steg (se
+# jury.beregn_testkjop_status for statusutledningen).
+TESTKJOP_TIDSLINJE_STEG = ["Kjøp og levering", "Kommunikasjon", "Kundeservice", "Retur", "Pengene tilbake"]
 TESTKJOP_FELLES_KOLONNER = ["Butikk", "Jurymedlem", "Steg", "Tidspunkt", "Score", "Kommentar"]
 # Steg-spesifikke kolonner, én kolonne per felt. Kolonnenavnene er uendret
-# fra før sammenslåingen (ingen skjemaendring nødvendig) - kun hvilket
-# steg-NAVN som eier dem er endret.
+# fra før sammenslåingen av Kassen+Levering+Utpakking (ingen skjemaendring
+# nødvendig) - kun hvilket steg-NAVN som eier DEM er endret.
 TESTKJOP_STEG_KOLONNER = [
     "ETA vist", "Lovet leveringsdato", "Måtte opprette konto", "Totalpris vist",  # «Kjøp og levering»
     "Faktisk leveringsdato", "Emballasje", "Produkt som beskrevet", "Returinfo i pakken",  # «Kjøp og levering»
     "Ordrebekreftelse mottatt", "Info om retur", "Mersalg", "Råd og tips",  # «Kommunikasjon»
-    "Har returløsning", "Avstand innlevering", "Beskjed retur mottatt", "Beskjed retur tidspunkt",  # «Retur og refusjon»
-    "Dato refusjon", "Fikk beskjed refusjon",  # «Retur og refusjon»
+    "Har returløsning", "Avstand innlevering", "Beskjed retur mottatt", "Beskjed retur tidspunkt",  # «Retur»
+    "Dato refusjon", "Fikk beskjed refusjon",  # «Pengene tilbake»
 ]
 TESTKJOP_HEADER = TESTKJOP_FELLES_KOLONNER + TESTKJOP_STEG_KOLONNER + ["Sist endret"]
 
