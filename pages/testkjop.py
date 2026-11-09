@@ -20,8 +20,8 @@ from data import naa_norsk
 from jury import beregn_dager_til_refusjon, beregn_leveringsavvik, beregn_svartid, beregn_testkjop_status, read_jury
 from pptx_eksport import bygg_testkjop_slide
 from sheets import (
-    read_appinnstilling, read_stores, read_testkjop, read_testkjop_kundeservice, read_testkjop_tildeling,
-    slett_testkjop_kundeservice_kanal, write_testkjop_kundeservice_kanal, write_testkjop_steg,
+    read_stores, read_testkjop, read_testkjop_kundeservice, read_testkjop_tildeling, slett_testkjop_kundeservice_kanal,
+    write_testkjop_kundeservice_kanal, write_testkjop_steg,
 )
 
 topptekst("Testkjøp")
@@ -40,11 +40,6 @@ try:
 except Exception as e:
     vis_feil("Kunne ikke lese testkjøp-data", e)
     st.stop()
-
-_masterpresentasjon = read_appinnstilling(sh, "Lenke til masterpresentasjon")
-if _masterpresentasjon:
-    st.link_button("Åpne masterpresentasjonen", _masterpresentasjon, icon=":material/slideshow:")
-    st.divider()
 
 navn_liste_jury = sorted(jury.keys())
 if not navn_liste_jury:

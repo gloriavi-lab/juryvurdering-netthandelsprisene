@@ -97,6 +97,19 @@ def topptekst(sidetittel: str):
         unsafe_allow_html=True,
     )
 
+    # Vises på ALLE sider (ikke bare Testkjøp) - jurymedlemmer skal finne
+    # lenken uansett hvor i appen de er, ikke bare på siden den opprinnelig
+    # ble lagt til på.
+    if sh:
+        from sheets import read_appinnstilling
+
+        try:
+            masterpresentasjon = read_appinnstilling(sh, "Lenke til masterpresentasjon")
+        except Exception:
+            masterpresentasjon = ""
+        if masterpresentasjon:
+            st.link_button("Åpne masterpresentasjonen", masterpresentasjon, icon=":material/slideshow:")
+
 
 def status_prikk(tilkoblet: bool, tekst_ok="Tilkoblet til Google Sheets", tekst_feil="Ikke tilkoblet"):
     klasse = "ok" if tilkoblet else "feil"
