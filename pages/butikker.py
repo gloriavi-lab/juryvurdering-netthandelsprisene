@@ -161,7 +161,7 @@ def vis_detaljpanel(navn):
     # lenger ned (som fortsatt viser dem i sin opprinnelige sammenheng).
     generelle_for_butikk = [g for g in alle_generelle if g["butikk"] == navn and g["kommentar"]]
     kriterie_kommentarer = [
-        (r["jurymedlem"], r["fagfelt"], r["kriterium"], r["kommentar"])
+        (r["jurymedlem"], r["fagfelt"], r["kriterium"], r["kommentar"], r["score"])
         for r in alle_vurderinger if r["butikk"] == navn and r["kommentar"]
         and (not aktiv_person or r["jurymedlem"] == aktiv_person)
     ]
@@ -171,9 +171,11 @@ def vis_detaljpanel(navn):
             with st.container(border=True):
                 st.markdown(f"**{g['jurymedlem']}** · _Generelt inntrykk_")
                 st.write(g["kommentar"])
-        for jurymedlem, fagfelt, kriterium, kommentar in kriterie_kommentarer:
+        for jurymedlem, fagfelt, kriterium, kommentar, score in kriterie_kommentarer:
+            normalisert = normalize_score(score)
+            score_tekst = str(normalisert) if isinstance(normalisert, (int, float)) else score
             with st.container(border=True):
-                st.markdown(f"**{jurymedlem}** · _{fagfelt} – {kriterium}_")
+                st.markdown(f"**{jurymedlem}** · _{fagfelt} – {kriterium}_ · Score: **{score_tekst}**")
                 st.write(kommentar)
     else:
         st.caption("Ingen kommentarer lagt inn for denne butikken ennå.")
