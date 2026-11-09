@@ -13,8 +13,9 @@ from jury import (
     read_jury, read_veiledning, sett_gjeldende_fase, slett_jurymedlem, write_jury,
 )
 from sheets import (
-    fane_oversikt, read_appinnstilling, read_fase1_scores, read_generelle_kommentarer, read_ratings, read_stores,
-    read_testkjop_tildeling, read_vurderinger, skriv_appinnstilling, write_testkjop_tildeling,
+    FASE2_FANE, fane_oversikt, formater_testkjop_header, oppdater_snitt_totalt_formler, read_appinnstilling,
+    read_fase1_scores, read_generelle_kommentarer, read_ratings, read_stores, read_testkjop_tildeling,
+    read_vurderinger, skriv_appinnstilling, write_testkjop_tildeling,
 )
 from theme import FAGFELT_FARGE
 
@@ -303,3 +304,28 @@ if mc2.button("Lagre", icon=":material/save:", key="lagre_masterpresentasjon", u
     else:
         st.toast("Lagret", icon=":material/check_circle:")
         st.rerun()
+
+rc1, rc2 = st.columns(2)
+if rc1.button(
+    "Fiks «Snitt totalt» for alle butikker", icon=":material/calculate:", use_container_width=True,
+    help="Skriver AVERAGE-formelen i kolonnen «Snitt totalt» på nytt for hver butikkrad i "
+         "Rangering ekspertvurdering. Butikkrader lagt til direkte i regnearket (ikke via appen) "
+         "får ikke formelen kopiert inn automatisk - bruk denne hvis snittet mangler for noen.",
+):
+    try:
+        _resultat = oppdater_snitt_totalt_formler(sh, FASE2_FANE)
+    except Exception as e:
+        vis_feil("Kunne ikke oppdatere Snitt totalt-formlene", e)
+    else:
+        st.toast(f"Oppdaterte formelen for {_resultat['antall']} butikker.", icon=":material/check_circle:")
+if rc2.button(
+    "Formater Testkjøp-fanen (farger som Rangering)", icon=":material/palette:", use_container_width=True,
+    help="Fargelegger header-raden i Testkjøp-fanen gruppert per steg, i samme fargepalett som "
+         "fagfeltene i Rangering ekspertvurdering. Rører ikke data eller kolonnerekkefølge.",
+):
+    try:
+        _resultat = formater_testkjop_header(sh)
+    except Exception as e:
+        vis_feil("Kunne ikke formatere Testkjøp-fanen", e)
+    else:
+        st.toast(f"Formaterte {_resultat['antall_kolonner']} kolonner i Testkjøp-fanen.", icon=":material/check_circle:")

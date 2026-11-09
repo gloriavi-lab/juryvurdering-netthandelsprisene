@@ -1786,6 +1786,22 @@ TESTKJOP_STEG_KOLONNER = [
 ]
 TESTKJOP_HEADER = TESTKJOP_FELLES_KOLONNER + TESTKJOP_STEG_KOLONNER + ["Sist endret"]
 
+# Samme fargepalett som FAGFELT_FARGE (theme.py) sine rå hex-verdier, én
+# farge per steg-gruppe - gir Testkjøp-fanen en lignende gruppert, farget
+# følelse som Rangering ekspertvurdering.
+TESTKJOP_GRUPPE_FARGE = {
+    "Kjøp og levering": "#4472C4", "Kommunikasjon": "#70AD47", "Retur": "#ED7D31", "Pengene tilbake": "#7030A0",
+}
+_TESTKJOP_FELT_TIL_GRUPPE = {}
+for _kol in ["ETA vist", "Lovet leveringsdato", "Måtte opprette konto", "Totalpris vist", "Faktisk leveringsdato", "Emballasje", "Produkt som beskrevet", "Returinfo i pakken"]:
+    _TESTKJOP_FELT_TIL_GRUPPE[_kol] = "Kjøp og levering"
+for _kol in ["Ordrebekreftelse mottatt", "Info om retur", "Mersalg", "Råd og tips"]:
+    _TESTKJOP_FELT_TIL_GRUPPE[_kol] = "Kommunikasjon"
+for _kol in ["Har returløsning", "Avstand innlevering", "Beskjed retur mottatt", "Beskjed retur tidspunkt"]:
+    _TESTKJOP_FELT_TIL_GRUPPE[_kol] = "Retur"
+for _kol in ["Dato refusjon", "Fikk beskjed refusjon"]:
+    _TESTKJOP_FELT_TIL_GRUPPE[_kol] = "Pengene tilbake"
+
 TESTKJOP_KUNDESERVICE_FANE = "Testkjøp-kundeservice"
 TESTKJOP_KUNDESERVICE_HEADER = [
     "Butikk", "Jurymedlem", "Kanal", "Spørsmål stilt", "Tidspunkt sendt", "Tidspunkt svar mottatt", "Kvalitet", "Sist endret",
@@ -1873,6 +1889,38 @@ def write_testkjop_steg(sh, butikk, jurymedlem, steg, felter):
     siste_bokstav = gspread.utils.rowcol_to_a1(1, len(fane_header)).rstrip("0123456789")
     ws.update([rad_ut], range_name=f"A{rad_nr}:{siste_bokstav}{rad_nr}")
     read_testkjop.clear()
+
+
+def formater_testkjop_header(sh):
+    """Fargelegger Testkjøp-fanens header (rad 1) gruppert per steg, i
+    samme fargepalett som fagfeltene i Rangering ekspertvurdering – slik
+    at arket visuelt ligner. Rører KUN formatering av rad 1 (farge, fet,
+    hvit tekst) + fryser raden - ingen data, kolonnerekkefølge eller
+    kolonneantall endres, siden read_testkjop/write_testkjop_steg leser
+    denne raden direkte som kolonnenavn (en ekte slått-sammen to-rads
+    gruppeheader slik Rangering har ville krevd å bygge om hele
+    lagringsformatet - se TESTKJOP_GRUPPE_FARGE for fargevalg per steg).
+    Leser radens FAKTISKE innhold, ikke konstanten, så dette fungerer
+    uansett gamle/ekstra kolonner fra tidligere opprydding."""
+    from theme import GRUNNKOLONNE_FARGE
+
+    ws = hent_eller_lag_fane(sh, TESTKJOP_FANE, TESTKJOP_HEADER)
+    header = ws.row_values(1)
+    if not header:
+        return {"antall_kolonner": 0}
+
+    formater = []
+    for i, navn in enumerate(header, start=1):
+        gruppe = _TESTKJOP_FELT_TIL_GRUPPE.get(navn.strip())
+        farge = TESTKJOP_GRUPPE_FARGE.get(gruppe, GRUNNKOLONNE_FARGE)
+        formater.append({"repeatCell": {
+            "range": {"sheetId": ws.id, "startRowIndex": 0, "endRowIndex": 1, "startColumnIndex": i - 1, "endColumnIndex": i},
+            "cell": {"userEnteredFormat": {"backgroundColor": _hex_til_rgb(farge), "textFormat": {"bold": True, "foregroundColor": {"red": 1, "green": 1, "blue": 1}}}},
+            "fields": "userEnteredFormat(backgroundColor,textFormat)",
+        }})
+    ws.spreadsheet.batch_update({"requests": formater})
+    ws.freeze(rows=1)
+    return {"antall_kolonner": len(header)}
 
 
 @st.cache_data(ttl=30, show_spinner=False)
