@@ -10,7 +10,7 @@ import streamlit as st
 from components import regneark_tabell, topptekst, vis_feil
 from data import er_tall, grupper_vurderinger, normalize_score, status_for_scorer
 from jury import aktive_kriterier, fagfelt_liste, kriterier_per_fagfelt, mine_kriterier, read_criteria, read_jury
-from sheets import mal_handling, read_ratings, read_stores, read_vurderinger
+from sheets import mal_handling, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger
 from theme import FAGFELT_FARGE, KLASSE_IKON, KLASSE_TONE
 
 topptekst("Butikker")
@@ -24,6 +24,7 @@ with mal_handling("Bytt side: Butikker"):
     try:
         butikker, _ = read_stores(sh)
         alle_vurderinger = read_vurderinger(sh)
+        alle_generelle = read_generelle_kommentarer(sh)
         fargede_fane_data = read_ratings(sh)
         jury = read_jury(sh)
         kriterier_fase3 = aktive_kriterier(read_criteria(sh), fase="Fase 3")
@@ -153,6 +154,29 @@ def vis_detaljpanel(navn):
         st.link_button("Besøk butikk", info["url"], icon=":material/open_in_new:")
     if aktiv_person:
         st.caption(f"Viser kun **{aktiv_person}** sine egne kriterier – velg «Alle (delt snitt)» i filteret over for alle jurymedlemmers svar.")
+    st.divider()
+
+    # Alle kommentarer for butikken samlet ett sted - generelle (helhetsinntrykk)
+    # og per-kriterium, uansett jurymedlem - i stedet for spredt per fagfelt
+    # lenger ned (som fortsatt viser dem i sin opprinnelige sammenheng).
+    generelle_for_butikk = [g for g in alle_generelle if g["butikk"] == navn and g["kommentar"]]
+    kriterie_kommentarer = [
+        (r["jurymedlem"], r["fagfelt"], r["kriterium"], r["kommentar"])
+        for r in alle_vurderinger if r["butikk"] == navn and r["kommentar"]
+        and (not aktiv_person or r["jurymedlem"] == aktiv_person)
+    ]
+    st.subheader("Alle kommentarer", anchor=False)
+    if generelle_for_butikk or kriterie_kommentarer:
+        for g in generelle_for_butikk:
+            with st.container(border=True):
+                st.markdown(f"**{g['jurymedlem']}** · _Generelt inntrykk_")
+                st.write(g["kommentar"])
+        for jurymedlem, fagfelt, kriterium, kommentar in kriterie_kommentarer:
+            with st.container(border=True):
+                st.markdown(f"**{jurymedlem}** · _{fagfelt} – {kriterium}_")
+                st.write(kommentar)
+    else:
+        st.caption("Ingen kommentarer lagt inn for denne butikken ennå.")
     st.divider()
 
     for fagfelt in FAGFELT:
