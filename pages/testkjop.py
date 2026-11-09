@@ -226,7 +226,7 @@ STEG_FELT_SPEC = {
         ("Har returløsning", "returlosning", "Har returløsning?"),
         ("Avstand innlevering", "text", "Avstand til innleveringssted (km eller fritekst)"),
         ("Beskjed retur mottatt", "ja_nei", "Beskjed om at retur er mottatt?"),
-        ("Beskjed retur tidspunkt", "tidspunkt", "Tidspunkt for beskjeden"),
+        ("Beskjed retur tidspunkt", "tidspunkt", "Tidspunkt for beskjeden om at retur er mottatt"),
     ],
     "Pengene tilbake": [
         ("Dato refusjon", "date", "Dato for refusjon"),
@@ -256,9 +256,15 @@ def _render_generisk_steg(steg):
 
     # «Kommunikasjon» og «Pengene tilbake» har ikke eget tidspunkt –
     # «Ordrebekreftelse mottatt» / «Dato for refusjon» er det som er
-    # relevant der.
+    # relevant der. «Retur» sitt tidspunkt har en egen, tydeligere etikett
+    # siden det lett forveksles med det separate «Tidspunkt for beskjeden»-
+    # feltet lenger ned (de to måler ulike ting - se STEG_FELT_SPEC).
+    TIDSPUNKT_LABEL = {"Retur": "Tidspunkt returen ble sendt (brukes til å beregne dager til refusjon)"}
     viser_tidspunkt = steg not in ("Kommunikasjon", "Pengene tilbake")
-    tidspunkt = _tidspunkt_widgets(f"{key_prefix}_tidspunkt", eksisterende.get("Tidspunkt", "")) if viser_tidspunkt else ""
+    tidspunkt = (
+        _tidspunkt_widgets(f"{key_prefix}_tidspunkt", eksisterende.get("Tidspunkt", ""), label=TIDSPUNKT_LABEL.get(steg, "Tidspunkt"))
+        if viser_tidspunkt else ""
+    )
     score = _score_widget(f"{key_prefix}_score", eksisterende.get("Score", ""))
 
     felter = {}
