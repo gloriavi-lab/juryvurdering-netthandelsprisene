@@ -228,14 +228,21 @@ div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px;
 .tk-opp-header {{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:4px; }}
 .tk-opp-butikk {{ font-size:20px; font-weight:800; color:var(--tekst); }}
 .tk-opp-sitat {{ font-style:italic; color:var(--tekst-dempet); font-size:14px; margin:10px 0 4px; line-height:1.5; border-left:3px solid var(--kant); padding-left:12px; }}
-.tk-opp-seksjon-tittel {{ font-size:11.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--tekst-dempet); margin:20px 0 10px; }}
-.tk-opp-tidslinje {{ display:flex; flex-direction:column; gap:6px; }}
-.tk-opp-rad {{ display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:8px; background:var(--lys-bakgrunn); }}
-.tk-opp-rad.ferdig {{ background:color-mix(in srgb, var(--gronn) 10%, var(--lys-bakgrunn)); }}
-.tk-opp-ikon {{ font-size:14px; width:18px; text-align:center; color:var(--gronn); flex:none; }}
-.tk-opp-rad:not(.ferdig) .tk-opp-ikon {{ color:var(--tekst-dempet); }}
-.tk-opp-navn {{ flex:1; font-size:14px; color:var(--tekst); font-weight:600; }}
-.tk-opp-score {{ font-size:12.5px; color:var(--tekst-dempet); white-space:nowrap; }}
+.tk-opp-seksjon-tittel {{ font-size:11.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--tekst-dempet); margin:20px 0 14px; }}
+/* Tidslinjen som en koblet stepper (sirkler+linjer), ikke flate rader -
+   hver dot-kolonne strekker seg (align-items:stretch, standard for flex)
+   slik at linja fyller hele avstanden ned til neste steg sin dot. */
+.tk-opp-tidslinje {{ display:flex; flex-direction:column; }}
+.tk-opp-steg {{ display:flex; gap:14px; }}
+.tk-opp-dot-col {{ display:flex; flex-direction:column; align-items:center; }}
+.tk-opp-dot {{ width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex:none; }}
+.tk-opp-dot.ferdig {{ background:var(--gronn); color:white; }}
+.tk-opp-dot:not(.ferdig) {{ background:var(--lys-bakgrunn); border:2px solid var(--kant); color:var(--tekst-dempet); }}
+.tk-opp-linje {{ width:2px; flex:1; min-height:22px; background:var(--kant); margin:3px 0; }}
+.tk-opp-linje.ferdig {{ background:var(--gronn); }}
+.tk-opp-steg-innhold {{ padding-bottom:20px; }}
+.tk-opp-steg-navn {{ font-size:14px; font-weight:600; color:var(--tekst); line-height:24px; }}
+.tk-opp-steg-score {{ font-size:12.5px; color:var(--tekst-dempet); margin-top:1px; }}
 .tk-dempet {{ color:var(--tekst-dempet) !important; font-weight:400 !important; }}
 .tk-opp-nokkeltall {{ display:flex; flex-wrap:wrap; gap:10px; }}
 .tk-opp-stat {{ background:var(--lys-bakgrunn); border-radius:8px; padding:9px 14px; min-width:140px; flex:1; }}

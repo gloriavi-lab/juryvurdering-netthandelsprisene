@@ -473,21 +473,29 @@ def _render_oppsummering_kort(nokkeltall, rodt_flagg):
     if generell:
         deler.append(f'<div class="tk-opp-sitat">«{_escape(generell)}»</div>')
 
+    # Tidslinjen som en koblet stepper: hvert steg er en sirkel (✓ hvis
+    # utført, ellers stegnummer) forbundet med en loddrett linje ned til
+    # neste steg, slik det ser ut i en vanlig leveringssporing.
     deler.append('<div class="tk-opp-seksjon-tittel">Tidslinje</div><div class="tk-opp-tidslinje">')
-    for steg in TIDSLINJE_STEG:
+    siste_indeks = len(TIDSLINJE_STEG) - 1
+    for i, steg in enumerate(TIDSLINJE_STEG):
         d = alle_steg.get(steg)
-        if d:
-            deler.append(
-                f'<div class="tk-opp-rad ferdig"><span class="tk-opp-ikon">✓</span>'
-                f'<span class="tk-opp-navn">{_escape(steg)}</span>'
-                f'<span class="tk-opp-score">Score {_escape(str(d.get("Score") or "–"))}</span></div>'
-            )
-        else:
-            deler.append(
-                f'<div class="tk-opp-rad"><span class="tk-opp-ikon">○</span>'
-                f'<span class="tk-opp-navn tk-dempet">{_escape(steg)}</span>'
-                f'<span class="tk-opp-score tk-dempet">Ikke utført</span></div>'
-            )
+        ferdig = bool(d)
+        dot_klasse = " ferdig" if ferdig else ""
+        dot_innhold = "✓" if ferdig else str(i + 1)
+        linje_html = f'<div class="tk-opp-linje{" ferdig" if ferdig else ""}"></div>' if i < siste_indeks else ""
+        score_html = (
+            f'<div class="tk-opp-steg-score">Score {_escape(str(d.get("Score") or "–"))}</div>' if ferdig
+            else '<div class="tk-opp-steg-score tk-dempet">Ikke utført</div>'
+        )
+        innhold_stil = ' style="padding-bottom:0"' if i == siste_indeks else ""
+        deler.append(
+            f'<div class="tk-opp-steg">'
+            f'<div class="tk-opp-dot-col"><div class="tk-opp-dot{dot_klasse}">{dot_innhold}</div>{linje_html}</div>'
+            f'<div class="tk-opp-steg-innhold"{innhold_stil}>'
+            f'<div class="tk-opp-steg-navn{" tk-dempet" if not ferdig else ""}">{_escape(steg)}</div>{score_html}</div>'
+            f"</div>"
+        )
     deler.append("</div>")
 
     if nokkeltall:
