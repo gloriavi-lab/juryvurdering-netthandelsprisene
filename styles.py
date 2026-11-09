@@ -220,6 +220,34 @@ div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px;
 
 /* Butikkliste på Vurdering – oppgaveliste-stil, ikke regneark */
 .status-merkelapp {{ display:inline-flex; align-items:center; gap:4px; font-size:12px; font-weight:700; padding:3px 10px; border-radius:20px; white-space:nowrap; }}
+
+/* Oppsummeringskortet på Testkjøp – samme innhold som kopier-teksten og
+   PowerPoint-slidenn (se pages/testkjop.py sin _beregn_nokkeltall), men
+   visuelt strukturert i appen i stedet for en rå monospace-tekstblokk. */
+.tk-oppsummering {{ background:var(--kort-bakgrunn); border:1px solid var(--kant); border-radius:14px; padding:22px 24px; }}
+.tk-opp-header {{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:4px; }}
+.tk-opp-butikk {{ font-size:20px; font-weight:800; color:var(--tekst); }}
+.tk-opp-sitat {{ font-style:italic; color:var(--tekst-dempet); font-size:14px; margin:10px 0 4px; line-height:1.5; border-left:3px solid var(--kant); padding-left:12px; }}
+.tk-opp-seksjon-tittel {{ font-size:11.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--tekst-dempet); margin:20px 0 10px; }}
+.tk-opp-tidslinje {{ display:flex; flex-direction:column; gap:6px; }}
+.tk-opp-rad {{ display:flex; align-items:center; gap:10px; padding:7px 10px; border-radius:8px; background:var(--lys-bakgrunn); }}
+.tk-opp-rad.ferdig {{ background:color-mix(in srgb, var(--gronn) 10%, var(--lys-bakgrunn)); }}
+.tk-opp-ikon {{ font-size:14px; width:18px; text-align:center; color:var(--gronn); flex:none; }}
+.tk-opp-rad:not(.ferdig) .tk-opp-ikon {{ color:var(--tekst-dempet); }}
+.tk-opp-navn {{ flex:1; font-size:14px; color:var(--tekst); font-weight:600; }}
+.tk-opp-score {{ font-size:12.5px; color:var(--tekst-dempet); white-space:nowrap; }}
+.tk-dempet {{ color:var(--tekst-dempet) !important; font-weight:400 !important; }}
+.tk-opp-nokkeltall {{ display:flex; flex-wrap:wrap; gap:10px; }}
+.tk-opp-stat {{ background:var(--lys-bakgrunn); border-radius:8px; padding:9px 14px; min-width:140px; flex:1; }}
+.tk-opp-stat-label {{ font-size:11.5px; color:var(--tekst-dempet); margin-bottom:2px; }}
+.tk-opp-stat-verdi {{ font-size:15px; font-weight:700; color:var(--tekst); }}
+.tk-opp-flagg {{ margin-top:16px; background:color-mix(in srgb, var(--feil) 10%, var(--kort-bakgrunn)); color:var(--feil); border-radius:8px; padding:10px 14px; font-size:13.5px; font-weight:600; }}
+.tk-opp-kommentarer {{ display:flex; flex-direction:column; gap:8px; }}
+.tk-opp-kommentar {{ font-size:13.5px; color:var(--tekst); line-height:1.5; background:var(--lys-bakgrunn); border-radius:8px; padding:8px 12px; }}
+.tk-opp-kommentar b {{ color:var(--tekst-dempet); font-weight:700; }}
+@media (max-width: 640px) {{
+    .tk-opp-stat {{ min-width:0; flex-basis:100%; }}
+}}
 /* Hver butikkrad er en ekte st.container(key=..., border=True) – IKKE en rå
    <div> åpnet i én st.markdown-kall og lukket i en annen, siden Streamlit
    rendrer hvert st.*-kall som sitt eget, isolerte DOM-element: en uferdig

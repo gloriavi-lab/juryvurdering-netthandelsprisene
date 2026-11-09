@@ -12,6 +12,7 @@ Alt lagres per (butikk, jurymedlem), så to jurymedlemmer kan testkjøpe hos
 samme butikk uten å overskrive hverandre – de får hver sin egen tidslinje."""
 
 from datetime import datetime as _datetime
+from html import escape as _escape
 
 import streamlit as st
 
@@ -454,9 +455,68 @@ def _bygg_oppsummering_tekst(nokkeltall, rodt_flagg):
     return "\n".join(linjer)
 
 
+def _render_oppsummering_kort(nokkeltall, rodt_flagg):
+    """Samme informasjon som _bygg_oppsummering_tekst (brukt til kopiering
+    og PowerPoint-eksport), men vist strukturert i appen i stedet for en
+    rå monospace-tekstblokk. Fritekst fra brukeren escapes siden dette
+    rendres med unsafe_allow_html=True."""
+    farge = STATUS_FARGE_TK.get(status, "#888")
+    deler = [
+        '<div class="tk-oppsummering">',
+        '<div class="tk-opp-header">',
+        f'<div class="tk-opp-butikk">{_escape(apnet_butikk)}</div>',
+        f'<span class="status-merkelapp" style="background:color-mix(in srgb, {farge} 12%, transparent);color:{farge};">{_escape(status)}</span>',
+        "</div>",
+    ]
+
+    generell = alle_steg.get("Generell kommentar", {}).get("Kommentar", "")
+    if generell:
+        deler.append(f'<div class="tk-opp-sitat">«{_escape(generell)}»</div>')
+
+    deler.append('<div class="tk-opp-seksjon-tittel">Tidslinje</div><div class="tk-opp-tidslinje">')
+    for steg in TIDSLINJE_STEG:
+        d = alle_steg.get(steg)
+        if d:
+            deler.append(
+                f'<div class="tk-opp-rad ferdig"><span class="tk-opp-ikon">✓</span>'
+                f'<span class="tk-opp-navn">{_escape(steg)}</span>'
+                f'<span class="tk-opp-score">Score {_escape(str(d.get("Score") or "–"))}</span></div>'
+            )
+        else:
+            deler.append(
+                f'<div class="tk-opp-rad"><span class="tk-opp-ikon">○</span>'
+                f'<span class="tk-opp-navn tk-dempet">{_escape(steg)}</span>'
+                f'<span class="tk-opp-score tk-dempet">Ikke utført</span></div>'
+            )
+    deler.append("</div>")
+
+    if nokkeltall:
+        deler.append('<div class="tk-opp-seksjon-tittel">Nøkkeltall</div><div class="tk-opp-nokkeltall">')
+        for etikett, verdi in nokkeltall:
+            deler.append(
+                f'<div class="tk-opp-stat"><div class="tk-opp-stat-label">{_escape(etikett)}</div>'
+                f'<div class="tk-opp-stat-verdi">{_escape(str(verdi))}</div></div>'
+            )
+        deler.append("</div>")
+
+    if rodt_flagg:
+        deler.append('<div class="tk-opp-flagg">🚩 Ingen returløsning – kunden må ordne returen selv.</div>')
+
+    kommentarer = [(s, alle_steg[s]["Kommentar"]) for s in TIDSLINJE_STEG if alle_steg.get(s, {}).get("Kommentar")]
+    if kommentarer:
+        deler.append('<div class="tk-opp-seksjon-tittel">Kommentarer</div><div class="tk-opp-kommentarer">')
+        for steg, tekst in kommentarer:
+            deler.append(f'<div class="tk-opp-kommentar"><b>{_escape(steg)}:</b> {_escape(tekst)}</div>')
+        deler.append("</div>")
+
+    deler.append("</div>")
+    st.markdown("".join(deler), unsafe_allow_html=True)
+
+
 _nokkeltall, _rodt_flagg = _beregn_nokkeltall()
 oppsummering_tekst = _bygg_oppsummering_tekst(_nokkeltall, _rodt_flagg)
-st.text(oppsummering_tekst)
+_render_oppsummering_kort(_nokkeltall, _rodt_flagg)
+st.write("")
 kc1, kc2 = st.columns(2)
 with kc1:
     kopier_knapp(oppsummering_tekst)
