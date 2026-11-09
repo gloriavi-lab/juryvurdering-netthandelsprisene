@@ -659,22 +659,27 @@ def beregn_testkjop_status(steg_data: dict) -> str:
     (fra sheets.read_testkjop). Utleder status fra hvilke av
     tidslinje-stegene som er fylt ut så langt.
 
-    «Retur sendt» vs. «Venter på refusjon» skilles på om steg «Retur» sin
-    «Beskjed retur mottatt» er besvart Ja (butikken har da bekreftet at de
-    har mottatt returen - man venter nå SPESIFIKT på selve refusjonen,
-    ikke lenger på at pakken skal komme frem)."""
-    if "Pengene tilbake" in steg_data:
-        return "Ferdig"
-    if "Retur" in steg_data:
-        if str(steg_data["Retur"].get("Beskjed retur mottatt", "")).strip().lower() == "ja":
+    «Retur og refusjon» og «Kjøp og levering» er slåtte-sammen steg, så
+    status skilles på FELT innenfor samme steg-rad i stedet for på hvilke
+    separate steg som finnes:
+    - «Dato refusjon» utfylt i «Retur og refusjon» → Ferdig.
+    - Ellers, «Beskjed retur mottatt» = Ja → Venter på refusjon (butikken
+      har bekreftet mottatt retur, venter nå SPESIFIKT på selve refusjonen).
+    - Ellers → Retur sendt.
+    - «Faktisk leveringsdato» utfylt i «Kjøp og levering» → Levert,
+      ellers → Bestilt."""
+    retur = steg_data.get("Retur og refusjon")
+    if retur:
+        if retur.get("Dato refusjon"):
+            return "Ferdig"
+        if str(retur.get("Beskjed retur mottatt", "")).strip().lower() == "ja":
             return "Venter på refusjon"
         return "Retur sendt"
-    if "Utpakking" in steg_data or "Levering" in steg_data:
-        return "Levert"
+    kjop = steg_data.get("Kjøp og levering")
+    if kjop:
+        return "Levert" if kjop.get("Faktisk leveringsdato") else "Bestilt"
     if "Kommunikasjon" in steg_data:
         return "Venter på levering"
-    if "Kassen" in steg_data:
-        return "Bestilt"
     return "Ikke startet"
 
 

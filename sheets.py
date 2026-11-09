@@ -1768,22 +1768,22 @@ TESTKJOP_TILDELING_FANE = "Testkjøp-tildeling"
 TESTKJOP_TILDELING_HEADER = ["Jurymedlem", "Butikk"]
 
 TESTKJOP_FANE = "Testkjøp"
-# De 8 stegene som vises i selve tidslinjen, i rekkefølge.
-TESTKJOP_TIDSLINJE_STEG = [
-    "Kassen", "Kommunikasjon", "Levering", "Utpakking", "Kundeservice", "Retur", "Pengene tilbake",
-]
-# Tverrgående – eget lite skjema per butikk, IKKE del av tidslinjen.
-TESTKJOP_TVERRGAENDE_STEG = ["Compliance", "Universell utforming"]
+# Stegene som vises i selve tidslinjen, i rekkefølge. «Kjøp og levering»
+# dekker tidligere Kassen+Levering+Utpakking, «Retur og refusjon» dekker
+# tidligere Retur+Pengene tilbake – slått sammen til ett steg/én rad hver,
+# se jury.beregn_testkjop_status for hvordan status utledes fra feltene
+# INNENFOR disse slåtte-sammen stegene.
+TESTKJOP_TIDSLINJE_STEG = ["Kjøp og levering", "Kommunikasjon", "Kundeservice", "Retur og refusjon"]
 TESTKJOP_FELLES_KOLONNER = ["Butikk", "Jurymedlem", "Steg", "Tidspunkt", "Score", "Kommentar"]
-# Steg-spesifikke kolonner, én kolonne per felt beskrevet i brief - kun den
-# aktuelle radens eget steg fyller ut "sine" kolonner, resten står tomme.
+# Steg-spesifikke kolonner, én kolonne per felt. Kolonnenavnene er uendret
+# fra før sammenslåingen (ingen skjemaendring nødvendig) - kun hvilket
+# steg-NAVN som eier dem er endret.
 TESTKJOP_STEG_KOLONNER = [
-    "ETA vist", "Lovet leveringsdato", "Måtte opprette konto", "Totalpris vist",  # Steg 1 - Kassen
-    "Ordrebekreftelse mottatt", "Info om retur", "Mersalg", "Råd og tips",  # Steg 2 - Kommunikasjon
-    "Faktisk leveringsdato",  # Steg 3 - Levering
-    "Emballasje", "Produkt som beskrevet", "Returinfo i pakken",  # Steg 4 - Utpakking
-    "Har returløsning", "Avstand innlevering", "Beskjed retur mottatt", "Beskjed retur tidspunkt",  # Steg 6 - Retur
-    "Dato refusjon", "Fikk beskjed refusjon",  # Steg 7 - Pengene tilbake
+    "ETA vist", "Lovet leveringsdato", "Måtte opprette konto", "Totalpris vist",  # «Kjøp og levering»
+    "Faktisk leveringsdato", "Emballasje", "Produkt som beskrevet", "Returinfo i pakken",  # «Kjøp og levering»
+    "Ordrebekreftelse mottatt", "Info om retur", "Mersalg", "Råd og tips",  # «Kommunikasjon»
+    "Har returløsning", "Avstand innlevering", "Beskjed retur mottatt", "Beskjed retur tidspunkt",  # «Retur og refusjon»
+    "Dato refusjon", "Fikk beskjed refusjon",  # «Retur og refusjon»
 ]
 TESTKJOP_HEADER = TESTKJOP_FELLES_KOLONNER + TESTKJOP_STEG_KOLONNER + ["Sist endret"]
 
@@ -1914,6 +1914,19 @@ def write_testkjop_kundeservice_kanal(sh, butikk, jurymedlem, kanal, felter):
     rad_ut = [str(verdier.get(kol, "")) for kol in TESTKJOP_KUNDESERVICE_HEADER]
     siste_bokstav = gspread.utils.rowcol_to_a1(1, len(TESTKJOP_KUNDESERVICE_HEADER)).rstrip("0123456789")
     ws.update([rad_ut], range_name=f"A{rad_nr}:{siste_bokstav}{rad_nr}")
+    read_testkjop_kundeservice.clear()
+
+
+def slett_testkjop_kundeservice_kanal(sh, butikk, jurymedlem, kanal):
+    """Fjerner raden for ÉN kundeservice-kanal helt (sletter selve raden,
+    ikke bare innholdet) – lar jurymedlemmet rydde opp en feilregistrert
+    kanal i stedet for å lagre over med tomme verdier."""
+    ws = hent_eller_lag_fane(sh, TESTKJOP_KUNDESERVICE_FANE, TESTKJOP_KUNDESERVICE_HEADER)
+    rader = ws.get_all_values()
+    for i, rad in enumerate(rader[1:], start=2):
+        if len(rad) >= 3 and rad[0].strip() == butikk and rad[1].strip() == jurymedlem and rad[2].strip() == kanal:
+            ws.delete_rows(i)
+            break
     read_testkjop_kundeservice.clear()
 
 
