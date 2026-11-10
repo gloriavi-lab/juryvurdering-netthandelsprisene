@@ -1,4 +1,4 @@
-# tvungen full redeploy nr. 5 (!important-fiksen for mørk modus kom ikke frem)
+# Tving full redeploy nr. 10 (mørk modus fjernet, lys modus låst i config.toml)
 streamlit>=1.42.0
 gspread>=6.0.0
 google-auth>=2.29.0

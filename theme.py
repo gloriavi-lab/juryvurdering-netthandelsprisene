@@ -6,14 +6,8 @@ Fagfelt-fargene er hentet direkte fra cellefargene i "Rangering fase 1"
 (rad 1/2, kolonne F, I, M, P, S) i Netthandelsprisene_Fase 1.xlsx.
 
 Verdiene under er CSS-variabel-REFERANSER (var(--x)), ikke rå hex – selve
-hex-verdiene (lys OG mørk modus) er definert ÉTT sted i styles.py sin
-:root/@media (prefers-color-scheme: dark)-blokk. Dette er det som faktisk
-gjør at fargene følger med når noen bytter til mørk modus i nettleser/OS,
-siden Python/Streamlit rendrer HTML én gang og ikke kan vite på forhånd
-hvilket fargeskjema nettleseren bruker – kun CSS kan reagere på det i
-etterkant. Alle kall-steder (FAGFELT_FARGE.get(...) osv.) er UENDRET og
-trenger ingen endring – de får bare en var(--x)-streng i stedet for en
-hex-streng, noe som fungerer akkurat likt i et style=/color:-attributt."""
+hex-verdiene er definert ÉTT sted i styles.py sin :root-blokk. Appen er låst
+til lys modus (se .streamlit/config.toml), så det finnes kun ett sett verdier."""
 
 # FORELØPIG verdi – vi har ikke tilgang til Posten Brings interne
 # profilmanual, så dette er Bring sin kjente offentlige merkegrønn som

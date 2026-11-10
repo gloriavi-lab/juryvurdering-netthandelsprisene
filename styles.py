@@ -1,10 +1,9 @@
 """Visuelt tema og egendefinert CSS – samlet ett sted, slik at sidene kan
 bruke native Streamlit-komponenter uten å style dem enkeltvis.
 
-Fargene defineres som CSS-variabler med lyse verdier som standard, og byttes
-ut under @media (prefers-color-scheme: dark) – det eneste som faktisk gjør at
-EGNE kort/klasser (ikke bare Streamlit sine innebygde widgets) følger med når
-noen bytter til mørk modus i nettleser/OS.
+Fargene defineres som CSS-variabler (kun lyse verdier). Appen er bevisst
+LÅST til lys modus (se .streamlit/config.toml) – mørk modus ble fjernet
+etter tilbakemeldinger fra juryen om at den ikke fungerte.
 
 Merkefarge (--merke) = Bring-grønn, brukt til primærknapper/aktiv tilstand/
 fremdrift. Rødt (--feil) er reservert til feil/advarsler, jf. brief – de to
@@ -49,39 +48,6 @@ CSS = f"""
     --status-tone-pabegynt: #FBF1D6;
     --status-tone-ikke-startet: #F0EFEC;
 }}
-@media (prefers-color-scheme: dark) {{
-    :root {{
-        --lys-bakgrunn: #1A1A1A;
-        --kort-bakgrunn: #262626;
-        --kant: #3A3A3A;
-        --tekst: #F2F2F2;
-        --tekst-dempet: #C2C0BB;  /* WCAG AA mot mørk bakgrunn */
-
-        /* Disse er for mørke/lave til å leses direkte på mørk bakgrunn i sin
-           opprinnelige, lys-modus-godkjente form – lysnet her, men ALDRI i
-           lys modus (så ingenting endrer seg for noen som ikke bruker mørk
-           modus). Kontrast dobbeltsjekket (WCAG AA, ≥4.5:1) mot BÅDE
-           --lys-bakgrunn og --kort-bakgrunn sine mørke verdier over. */
-        --merke-tekst: color-mix(in srgb, {BRING_GRONN} 75%, white);
-        --feil: color-mix(in srgb, #C8102E 70%, white);
-        --gronn: color-mix(in srgb, #1E8E5A 75%, white);
-        --fagfelt-forsteinntrykk: color-mix(in srgb, #4472C4 75%, white);
-        --fagfelt-innovasjon: color-mix(in srgb, #7030A0 60%, white);
-        --status-ikke-startet: color-mix(in srgb, #8A8780 85%, white);
-
-        /* Pastell-tonene (lyse bakgrunnsflater) blir i stedet en SVAK
-           fargetint oppå det mørke kortet – samme logikk som en lys
-           pastell, bare mørk-tilpasset i stedet for bare å gjenbruke den
-           lyse (nesten hvite) fargen rått på en mørk bakgrunn. */
-        --klasse-liten: color-mix(in srgb, #1E8E5A 18%, var(--kort-bakgrunn));
-        --klasse-medium: color-mix(in srgb, #4472C4 18%, var(--kort-bakgrunn));
-        --klasse-stor: color-mix(in srgb, #ED7D31 18%, var(--kort-bakgrunn));
-        --status-tone-ferdig: color-mix(in srgb, #1E8E5A 18%, var(--kort-bakgrunn));
-        --status-tone-pabegynt: color-mix(in srgb, #C8A200 18%, var(--kort-bakgrunn));
-        --status-tone-ikke-startet: color-mix(in srgb, #8A8780 18%, var(--kort-bakgrunn));
-    }}
-}}
-
 /* La Streamlits "legg til lenke"-anker-ikon ved overskrifter være usynlig – vi
    bruker anchor=False de fleste steder, men dette er et vern i tillegg. */
 [data-testid="stHeaderActionElements"] {{ display:none; }}
@@ -98,19 +64,9 @@ CSS = f"""
    hver "/" i komponentene selv), derfor normal/normal som default. */
 body {{ overflow-wrap: normal; word-break: normal; }}
 
-/* VIKTIG (reell bug funnet i mørk modus): Streamlit sin EGEN temamotor
-   (som styrer farge på native h1/h2/h3/p/span/label – IKKE custom HTML vi
-   selv skriver) oppdaget IKKE nettleserens/OS sin prefers-color-scheme i
-   denne hosting-konteksten (bekreftet: native overskrifter beholdt
-   Streamlit sin lyse standardfarge rgb(49,51,63) selv når OS/nettleser sto
-   på mørk modus) – selv om .streamlit/config.toml bevisst IKKE låser
-   textColor, nettopp for at dette skulle følge systeminnstillingen
-   automatisk. Satte derfor FARGE her også (ikke bare bakgrunn), via SAMME
-   --tekst-variabel som allerede er mørk-tilpasset – dette ARVES av alle
-   native tekst-elementer som selv IKKE har en mer spesifikk fargeregel
-   (så hvit tekst på knapper/merkelapper påvirkes ikke, de har allerede sin
-   egen, mer spesifikke regel), og løser dermed kontrastproblemet helt
-   uavhengig av om Streamlit sin egen temadeteksjon fungerer her eller ei. */
+/* Bakgrunn og tekstfarge settes eksplisitt fra de samme variablene som
+   egne kort bruker, så native Streamlit-tekst og egen HTML alltid matcher
+   (appen er låst til lys modus – se .streamlit/config.toml). */
 .stApp {{ background-color: var(--lys-bakgrunn); color: var(--tekst) !important; }}
 div[data-testid="stExpander"] {{ background-color: var(--kort-bakgrunn); border-radius: 12px; border: 1px solid var(--kant); }}
 div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px; padding: 20px; background: var(--kort-bakgrunn); }}
@@ -237,13 +193,24 @@ div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px;
 .tk-opp-dot-col {{ display:flex; flex-direction:column; align-items:center; }}
 .tk-opp-dot {{ width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:12px; font-weight:700; flex:none; }}
 .tk-opp-dot.ferdig {{ background:var(--gronn); color:white; }}
-.tk-opp-dot:not(.ferdig) {{ background:var(--lys-bakgrunn); border:2px solid var(--kant); color:var(--tekst-dempet); }}
+.tk-opp-dot:not(.ferdig):not(.delvis) {{ background:var(--lys-bakgrunn); border:2px solid var(--kant); color:var(--tekst-dempet); }}
 .tk-opp-linje {{ width:2px; flex:1; min-height:22px; background:var(--kant); margin:3px 0; }}
 .tk-opp-linje.ferdig {{ background:var(--gronn); }}
 .tk-opp-steg-innhold {{ padding-bottom:20px; }}
 .tk-opp-steg-navn {{ font-size:14px; font-weight:600; color:var(--tekst); line-height:24px; }}
 .tk-opp-steg-score {{ font-size:12.5px; color:var(--tekst-dempet); margin-top:1px; }}
 .tk-dempet {{ color:var(--tekst-dempet) !important; font-weight:400 !important; }}
+/* Sjekkliste i Testkjøp-oppsummeringen: gul ring = påbegynt steg, og
+   underpunkter med en liten avkrysningsboks hver. */
+.tk-opp-dot.delvis {{ background:var(--status-tone-pabegynt); border:2px solid var(--status-pabegynt); color:var(--tekst); }}
+.tk-opp-fremdrift {{ display:flex; align-items:center; gap:12px; margin:-4px 0 18px; }}
+.tk-opp-fremdrift .fremdrift-bakgrunn {{ flex:1; height:8px; }}
+.tk-opp-fremdrift-tekst {{ font-size:13px; font-weight:600; color:var(--tekst); white-space:nowrap; }}
+.tk-opp-punkter {{ list-style:none; margin:6px 0 0; padding:0; display:flex; flex-direction:column; gap:3px; }}
+.tk-opp-punkt {{ display:flex; align-items:center; gap:8px; font-size:13px; color:var(--tekst-dempet); margin:0 !important; }}
+.tk-opp-punkt.ok {{ color:var(--tekst); }}
+.tk-opp-boks {{ width:15px; height:15px; border-radius:4px; border:1.5px solid var(--kant); display:inline-flex; align-items:center; justify-content:center; font-size:10px; font-weight:800; flex:none; background:var(--kort-bakgrunn); }}
+.tk-opp-punkt.ok .tk-opp-boks {{ background:var(--gronn); border-color:var(--gronn); color:white; }}
 .tk-opp-nokkeltall {{ display:flex; flex-wrap:wrap; gap:10px; }}
 .tk-opp-stat {{ background:var(--lys-bakgrunn); border-radius:8px; padding:9px 14px; min-width:140px; flex:1; }}
 .tk-opp-stat-label {{ font-size:11.5px; color:var(--tekst-dempet); margin-bottom:2px; }}

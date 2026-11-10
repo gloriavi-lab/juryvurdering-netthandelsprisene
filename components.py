@@ -154,11 +154,19 @@ def fremdriftslinje(andel: float, tekst: str):
 
 
 def lagringsstatus(tilstand: str, detalj: str = ""):
-    """tilstand: "lagrer", "lagret", "feil" eller "" (ingenting vist)."""
+    """tilstand: "lagrer", "lagret", "auto" (automatisk lagret), "venter"
+    (info – f.eks. kommentar uten score), "mangler" (lagret, men kommentar
+    mangler), "feil" eller "" (ingenting vist)."""
     if tilstand == "lagrer":
         st.markdown('<div class="lagringsstatus">⏳ Lagrer …</div>', unsafe_allow_html=True)
     elif tilstand == "lagret":
         st.markdown(f'<div class="lagringsstatus ok">✓ Lagret {detalj}</div>', unsafe_allow_html=True)
+    elif tilstand == "auto":
+        st.markdown(f'<div class="lagringsstatus ok">✓ Lagret automatisk {detalj}</div>', unsafe_allow_html=True)
+    elif tilstand == "venter":
+        st.markdown(f'<div class="lagringsstatus">ⓘ {detalj}</div>', unsafe_allow_html=True)
+    elif tilstand == "mangler":
+        st.markdown(f'<div class="lagringsstatus feil">⚠ Svarene dine er lagret, men {detalj}</div>', unsafe_allow_html=True)
     elif tilstand == "feil":
         st.markdown(f'<div class="lagringsstatus feil">⚠ Ikke lagret – prøv igjen{(" (" + detalj + ")") if detalj else ""}</div>', unsafe_allow_html=True)
 

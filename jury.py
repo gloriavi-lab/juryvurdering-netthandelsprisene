@@ -654,22 +654,49 @@ TESTKJOP_STATUSER = [
 ]
 
 
+_KJOP_FELT = ("ETA vist", "Lovet leveringsdato", "Måtte opprette konto", "Totalpris vist")
+_LEVERING_FELT = ("Faktisk leveringsdato", "Emballasje", "Produkt som beskrevet", "Returinfo i pakken")
+GAMMELT_KJOP_OG_LEVERING = "Kjøp og levering"
+
+
+def normaliser_testkjop_steg(steg_data: dict) -> dict:
+    """Bakoverkompatibilitet: en periode var «Kjøp» og «Levering» slått
+    sammen til ett steg, «Kjøp og levering». Rader lagret da finnes
+    fortsatt i arket – her fordeles de på de to nye stegene, KUN i minnet
+    (ingenting skrives eller slettes i arket). Et nytt «Kjøp»/«Levering»-
+    steg som er lagret etter oppdelingen vinner alltid over den gamle raden.
+
+    - «Kjøp» får tidspunkt, score, kommentar og kjøpsfeltene.
+    - «Levering» opprettes bare hvis den gamle raden faktisk har en
+      leveringsdato (ellers var varen ikke levert ennå – den gamle
+      sammenslåtte løsningen fylte inn dagens dato automatisk, og det var
+      nettopp derfor stegene ble delt opp igjen). Score/kommentar ble gitt
+      for HELE det gamle steget og kopieres ikke dit, så de ikke telles
+      dobbelt i snittet."""
+    gammel = steg_data.get(GAMMELT_KJOP_OG_LEVERING)
+    if not gammel:
+        return steg_data
+    resultat = {k: v for k, v in steg_data.items() if k != GAMMELT_KJOP_OG_LEVERING}
+    if "Kjøp" not in resultat:
+        resultat["Kjøp"] = {k: v for k, v in gammel.items() if k not in _LEVERING_FELT}
+    if "Levering" not in resultat and str(gammel.get("Faktisk leveringsdato", "")).strip():
+        resultat["Levering"] = {k: v for k, v in gammel.items() if k not in _KJOP_FELT and k not in ("Score", "Kommentar", "Tidspunkt")}
+    return resultat
+
+
 def beregn_testkjop_status(steg_data: dict) -> str:
     """steg_data: {steg: {kolonnenavn: verdi}} for ÉN butikk+jurymedlem
-    (fra sheets.read_testkjop). Utleder status fra hvilke av
-    tidslinje-stegene som er fylt ut så langt.
-
-    «Kjøp og levering» er ett slått-sammen steg (tidligere Kassen+Levering+
-    Utpakking) – status for DET skilles på om «Faktisk leveringsdato» er
-    utfylt, ikke på hvilke av de opprinnelige del-stegene som finnes.
-    «Retur» og «Pengene tilbake» er fortsatt to separate steg:
+    (fra sheets.read_testkjop, gjerne allerede normalisert). Utleder status
+    fra hvilke av tidslinje-stegene som er fylt ut så langt:
     - «Pengene tilbake» finnes → Ferdig.
     - Ellers, «Retur» finnes og «Beskjed retur mottatt» = Ja → Venter på
-      refusjon (butikken har bekreftet mottatt retur, venter nå
-      SPESIFIKT på selve refusjonen).
+      refusjon.
     - Ellers, «Retur» finnes → Retur sendt.
-    - «Faktisk leveringsdato» utfylt i «Kjøp og levering» → Levert,
-      ellers → Bestilt."""
+    - «Levering» med faktisk leveringsdato → Levert.
+    - «Kjøp» (eller «Kommunikasjon»/«Levering» uten dato) → Venter på
+      levering hvis ordrebekreftelse/kommunikasjon er registrert, ellers
+      Bestilt."""
+    steg_data = normaliser_testkjop_steg(steg_data)
     if "Pengene tilbake" in steg_data:
         return "Ferdig"
     retur = steg_data.get("Retur")
@@ -677,11 +704,13 @@ def beregn_testkjop_status(steg_data: dict) -> str:
         if str(retur.get("Beskjed retur mottatt", "")).strip().lower() == "ja":
             return "Venter på refusjon"
         return "Retur sendt"
-    kjop = steg_data.get("Kjøp og levering")
-    if kjop:
-        return "Levert" if kjop.get("Faktisk leveringsdato") else "Bestilt"
-    if "Kommunikasjon" in steg_data:
+    levering = steg_data.get("Levering")
+    if levering and str(levering.get("Faktisk leveringsdato", "")).strip():
+        return "Levert"
+    if "Kommunikasjon" in steg_data or levering:
         return "Venter på levering"
+    if "Kjøp" in steg_data:
+        return "Bestilt"
     return "Ikke startet"
 
 

@@ -16,12 +16,25 @@ EKSPLISITT når brukeren bytter til en ANNEN butikk (sammenlignet med forrige
 rad i session_state), slik at visningen alltid viser det som faktisk er
 lagret – ikke en tilfeldig gammel verdi fra en tidligere visning i samme
 nettleserøkt. Det var roten til at en slettet kommentar kunne "komme
-tilbake" og at en score kunne se ut til å forsvinne."""
+tilbake" og at en score kunne se ut til å forsvinne.
+
+AUTOMATISK LAGRING (lagt til etter at juryen mistet svar når økten ble
+koblet fra etter en stund uten aktivitet): hver score og kommentar lagres
+i regnearket idet den endres (on_change – for kommentarer når man går ut av
+feltet). Det som nettopp er autolagret, huskes i session_state
+(«_autolagret») og brukes FØR de mellomlagrede arkdataene – ellers ville en
+fragment-rerun vist gamle verdier frem til neste fulle lasting. «Lagre →»
+finnes fortsatt, og gjør en full, bekreftet lagring + går til neste butikk.
+
+TO VISNINGER: «Per butikk» (som før – alle mine kriterier for én butikk) og
+«Per kriterium» (ett kriterium, alle mine butikker under hverandre) for de
+som foretrekker å gå gjennom ett og ett kriterium på tvers av butikkene.
+Begge bruker de samme widget-nøklene og samme autolagring."""
 
 import streamlit as st
 
 from components import feilmelding_tekst, fremdriftslinje, klasse_badge, lagringsstatus, scroll_til_toppen, status_merkelapp_html, topptekst, tom_tilstand, vis_feil
-from data import IKKE_VURDERT, grupper_vurderinger, mine_scorer, naa_norsk, normalize_score, offisiell_celleverdi, status_for_scorer
+from data import IKKE_VURDERT, KLASSER, grupper_vurderinger, mine_scorer, naa_norsk, normalize_score, offisiell_celleverdi, status_for_scorer
 from jury import (
     aktive_kriterier, beskriv_tildeling, gjeldende_fase_streng, kriterier_per_fagfelt, mine_kriterier, read_criteria,
     read_faser, read_jury,
@@ -30,7 +43,7 @@ from sheets import (
     mal_handling, read_generelle_kommentarer, read_ratings, read_stores, read_vurderinger,
     skriv_mange_til_farget_fane, upsert_generell_kommentar, upsert_mange_vurderinger,
 )
-from theme import FAGFELT_FARGE, STATUS_FARGE, STATUS_TEKST, STATUS_TONE
+from theme import FAGFELT_FARGE, KLASSE_IKON, STATUS_FARGE, STATUS_TEKST, STATUS_TONE
 
 topptekst("Vurdering")
 
@@ -92,6 +105,15 @@ with tc1:
 with tc2:
     st.link_button("Åpne regnearket", sh.url, icon=":material/open_in_new:", use_container_width=True)
 
+# Widget-nøklene for score/kommentar inneholder ikke jurymedlemmets navn –
+# bytter noen navn i velgeren over, tømmes de, slik at forrige persons svar
+# aldri blir stående i skjemaet (og autolagret under feil navn).
+if st.session_state.get("_sist_jurynavn") != jurynavn:
+    for _k in [k for k in st.session_state if isinstance(k, str) and k.startswith(("seg_", "kom_krit_", "generell_"))]:
+        st.session_state.pop(_k, None)
+    st.session_state.pop("_autolagring", None)
+    st.session_state["_sist_jurynavn"] = jurynavn
+
 mine = mine_kriterier(jury, jurynavn)
 if not mine:
     tom_tilstand("🤷", "Ingen kriterier tildelt deg ennå", "Ta kontakt med juryleder for å bli tildelt kriterier å vurdere.")
@@ -121,13 +143,47 @@ for g in alle_generelle:
 
 navn_liste_butikker = sorted(butikker.keys())
 
+# Det som er AUTOLAGRET i denne økten: {(jurymedlem, butikk, kriterium):
+# {"score": normalisert|None, "kommentar": str}} og {(jurymedlem, butikk,
+# GENERELL): str}. Ferskere enn de mellomlagrede arkdataene over, så det
+# brukes først overalt (se AUTOMATISK LAGRING øverst i fila).
+_AUTO = st.session_state.setdefault("_autolagret", {})
+GENERELL = "__generell__"
+
+
+def _min_score(navn, krit):
+    """Normalisert score for (butikk, kriterium): autolagret verdi hvis den
+    finnes, ellers den offisielle verdien i den fargede fanen."""
+    o = _AUTO.get((jurynavn, navn, krit))
+    if o is not None:
+        return o["score"]
+    return normalize_score(fargede_fane_data.get(navn, {}).get("scorer", {}).get(krit))
+
+
+def _min_kommentar(navn, krit):
+    o = _AUTO.get((jurynavn, navn, krit))
+    if o is not None:
+        return o["kommentar"]
+    return mine_oppslag.get((navn, krit), {}).get("kommentar") or ""
+
+
+def _min_generell(navn):
+    o = _AUTO.get((jurynavn, navn, GENERELL))
+    if o is not None:
+        return o
+    return next((g["kommentar"] for g in generell_per_butikk.get(navn, []) if g["jurymedlem"] == jurynavn), "") or ""
+
 
 def grid_scorer_for(navn):
-    """{kriterium: rå_verdi} fra DEN FARGEDE FANEN, begrenset til MINE
-    tildelte kriterier – dette er den offisielle, synlige verdien (se
-    DATAMODELL øverst i fila)."""
-    alle_scorer = fargede_fane_data.get(navn, {}).get("scorer", {})
-    return {k: alle_scorer[k] for k in mine_kriterier_flat if k in alle_scorer}
+    """{kriterium: verdi} – den offisielle, synlige verdien fra DEN FARGEDE
+    FANEN (se DATAMODELL øverst i fila), oppdatert med det som er
+    autolagret i denne økten, begrenset til MINE tildelte kriterier."""
+    resultat = {}
+    for k in mine_kriterier_flat:
+        verdi = _min_score(navn, k)
+        if verdi is not None:
+            resultat[k] = verdi
+    return resultat
 
 
 def status(navn):
@@ -158,10 +214,10 @@ antall_gjenstar = len(navn_liste_butikker) - antall_ferdig - antall_pabegynt
 def _neste_anbefalt():
     """Neste PÅBEGYNTE butikk (fortsett der du slapp) – ellers neste
     IKKE STARTEDE, alfabetisk. None hvis alt er ferdig."""
-    pabegynte = sorted(n for n in navn_liste_butikker if status(n) == "Påbegynt")
+    pabegynte = sorted(n for n in navn_liste_butikker if status(n) == "Påbegynt" and _innenfor_filter(n))
     if pabegynte:
         return pabegynte[0]
-    gjenstaende = sorted(n for n in navn_liste_butikker if status(n) == "Ikke startet")
+    gjenstaende = sorted(n for n in navn_liste_butikker if status(n) == "Ikke startet" and _innenfor_filter(n))
     return gjenstaende[0] if gjenstaende else None
 
 
@@ -181,6 +237,96 @@ def _bytt_til(navn):
         _nullstill_butikk_state(navn)
         st.session_state["_sist_vist_butikk"] = navn
     st.session_state["_apnet_butikk"] = navn
+
+
+def _seed_kriterium(navn, krit):
+    """Fyller widget-nøklene for (butikk, kriterium) fra sist lagrede
+    verdi – KUN hvis de ikke allerede finnes (da er det brukerens egen,
+    pågående inntasting som gjelder)."""
+    seg_key, kom_key = f"seg_{navn}_{krit}", f"kom_krit_{navn}_{krit}"
+    if seg_key not in st.session_state:
+        score = _min_score(navn, krit)
+        st.session_state[seg_key] = score if isinstance(score, (int, str)) else None
+    if kom_key not in st.session_state:
+        st.session_state[kom_key] = _min_kommentar(navn, krit)
+
+
+def _score_fra_widget(valg):
+    if valg == "Kan ikke vurdere":
+        return IKKE_VURDERT
+    return str(valg) if valg is not None else ""
+
+
+def _autolagre_kriterium(navn, krit):
+    """on_change-callback for score og kommentar: lagrer ETT kriterium for
+    én butikk med en gang – i loggen («Vurderinger») og i den fargede
+    fanen. Lettere enn full «Lagre» (ingen tilbakelesing, og andre
+    jurymedlemmers bidrag til et delt kriterium tas fra den mellomlagrede
+    loggen i stedet for en ny lesing), for å spare på den felles
+    Sheets-kvoten. Score 1–3 uten kommentar lagres OGSÅ – kriteriet merkes
+    bare «Kommentar mangler» til kommentaren er skrevet."""
+    fagfelt = krit_til_fagfelt.get(krit)
+    score = _score_fra_widget(st.session_state.get(f"seg_{navn}_{krit}"))
+    kommentar = (st.session_state.get(f"kom_krit_{navn}_{krit}") or "").strip()
+    if not score and kommentar:
+        st.session_state["_autolagring"] = ("venter", f"Velg en score for «{krit}» – kommentaren lagres automatisk når scoren er valgt.")
+        return
+    if normalize_score(score) == _min_score(navn, krit) and kommentar == _min_kommentar(navn, krit):
+        return  # ingenting å lagre
+    with mal_handling("Autolagring"):
+        try:
+            upsert_mange_vurderinger(sh, navn, jurynavn, [(fagfelt, krit, score, kommentar)])
+            oppforinger = [
+                (r["jurymedlem"], r["score"], r["kommentar"], r["sist_endret"]) for r in alle_vurderinger
+                if r["butikk"] == navn and r["kriterium"] == krit and r["jurymedlem"] != jurynavn
+            ]
+            if score:
+                oppforinger.append((jurynavn, score, kommentar, ""))
+            verdi, notat = offisiell_celleverdi(oppforinger)
+            skriv_mange_til_farget_fane(sh, navn, [(fagfelt, krit, verdi, notat)])
+        except Exception as e:
+            st.session_state["_autolagring"] = ("feil", feilmelding_tekst("Automatisk lagring feilet", e))
+            return
+    _AUTO[(jurynavn, navn, krit)] = {"score": normalize_score(score), "kommentar": kommentar}
+    st.session_state["_autolagring"] = ("auto", naa_norsk().strftime("%H:%M"))
+
+
+def _autolagre_generell(navn):
+    tekst = (st.session_state.get(f"generell_{navn}") or "").strip()
+    if tekst == _min_generell(navn):
+        return
+    with mal_handling("Autolagring"):
+        try:
+            upsert_generell_kommentar(sh, navn, jurynavn, tekst)
+        except Exception as e:
+            st.session_state["_autolagring"] = ("feil", feilmelding_tekst("Automatisk lagring av generell kommentar feilet", e))
+            return
+    _AUTO[(jurynavn, navn, GENERELL)] = tekst
+    st.session_state["_autolagring"] = ("auto", naa_norsk().strftime("%H:%M"))
+
+
+def _vis_autolagring():
+    tilstand = st.session_state.get("_autolagring")
+    if tilstand:
+        lagringsstatus(tilstand[0], tilstand[1])
+
+
+def _mangler_kommentar(navn, krit):
+    valg = st.session_state.get(f"seg_{navn}_{krit}")
+    kommentar = (st.session_state.get(f"kom_krit_{navn}_{krit}") or "").strip()
+    return isinstance(valg, (int, float)) and valg <= 3 and not kommentar
+
+
+# Valgt størrelsesfilter (Liten/Medium/Stor) – brukt både i lista og av
+# «Lagre →»/«Start vurdering», slik at «neste butikk» holder seg innenfor
+# den størrelsen man har valgt å jobbe med.
+def _storrelser_valgt():
+    return st.session_state.get("_vurdering_storrelse_sist") or []
+
+
+def _innenfor_filter(navn):
+    valgt = _storrelser_valgt()
+    return not valgt or butikker[navn].get("klasse") in valgt
 
 
 # ── Tre statuskort + grønn fremdriftslinje ──
@@ -260,8 +406,10 @@ def _lagre_denne_impl(navn):
             kriterier_a_lagre.append((fagfelt, krit, score, kommentar_krit))
 
     if manglende_kommentar:
+        # Scorene ER allerede lagret av autolagringen – her stoppes bare
+        # «gå videre», så ingen glemmer den påkrevde kommentaren.
         ord = "kriterium" if len(manglende_kommentar) == 1 else "kriterier"
-        st.session_state["_lagringstilstand"] = ("feil", f"{len(manglende_kommentar)} {ord} mangler kommentar: " + ", ".join(manglende_kommentar))
+        st.session_state["_lagringstilstand"] = ("mangler", f"{len(manglende_kommentar)} {ord} mangler kommentar: " + ", ".join(manglende_kommentar))
         return False
 
     skrevet = {krit: (score, kommentar) for _, krit, score, kommentar in kriterier_a_lagre}
@@ -347,6 +495,11 @@ def _lagre_denne_impl(navn):
         return False
 
     st.session_state["_lagringstilstand"] = ("lagret", naa_norsk().strftime("%H:%M"))
+    st.session_state.pop("_autolagring", None)
+    # Alt for butikken er nå bekreftet i arket (og cachen er tømt) – la de
+    # ferske arkdataene gjelde igjen i stedet for øktens autolagrede kopi.
+    for k in [k for k in _AUTO if k[0] == jurynavn and k[1] == navn]:
+        _AUTO.pop(k, None)
     return True
 
 
@@ -355,7 +508,7 @@ def neste_uferdige(gjeldende):
         return navn_liste_butikker[0] if navn_liste_butikker else None
     start = navn_liste_butikker.index(gjeldende)
     for n in navn_liste_butikker[start + 1:] + navn_liste_butikker[:start]:
-        if status(n) != "Ferdig":
+        if status(n) != "Ferdig" and _innenfor_filter(n):
             return n
     return None
 
@@ -379,15 +532,12 @@ def _har_ulagrede_endringer(navn):
             verdi_na = str(valg)
         else:
             verdi_na = None
-        verdi_lagret = fargede_fane_data.get(navn, {}).get("scorer", {}).get(krit)
-        if normalize_score(verdi_na) != normalize_score(verdi_lagret):
+        if normalize_score(verdi_na) != _min_score(navn, krit):
             return True
-        kommentar_lagret = mine_oppslag.get((navn, krit), {}).get("kommentar") or ""
-        if kommentar_na != kommentar_lagret:
+        if kommentar_na != _min_kommentar(navn, krit):
             return True
     generell_na = (st.session_state.get(f"generell_{navn}") or "").strip()
-    generell_lagret = next((g["kommentar"] for g in generell_per_butikk.get(navn, []) if g["jurymedlem"] == jurynavn), "")
-    return generell_na != (generell_lagret or "")
+    return generell_na != _min_generell(navn)
 
 
 @st.dialog("Ulagrede endringer")
@@ -427,7 +577,7 @@ def vis_vurderingsvisning():
         st.markdown(f"### {navn}")
         klasse_badge(info.get("klasse", "–"))
         st.caption(info.get("bransje", "–"))
-        st.caption(f"Butikk {i + 1} av {len(navn_liste_butikker)} · {_gyldig_status_tekst(navn)}")
+        st.caption(f"Butikk {i + 1} av {len(navn_liste_butikker)} · {_gyldig_status_tekst(navn)} · Svarene lagres automatisk")
     with hc2:
         if info.get("url"):
             st.link_button("Besøk butikk", info["url"], icon=":material/open_in_new:", use_container_width=True)
@@ -460,18 +610,15 @@ def vis_vurderingsvisning():
         farge = FAGFELT_FARGE.get(fagfelt, "#888")
         st.markdown(f'<div style="border-left:4px solid {farge};padding-left:10px;margin:14px 0 10px 0;font-weight:700;">{fagfelt}</div>', unsafe_allow_html=True)
         for krit in kriterier:
-            eksisterende = mine_oppslag.get((navn, krit), {})  # MIN egen kommentar (loggen)
-            grid_score = normalize_score(fargede_fane_data.get(navn, {}).get("scorer", {}).get(krit))  # offisiell score (den fargede fanen)
             info_k = kriterium_info.get(krit, {})
             kom_key = f"kom_krit_{navn}_{krit}"
             seg_key = f"seg_{navn}_{krit}"
+            _seed_kriterium(navn, krit)
 
             # Mangler-kommentar er regnet ut LIVE (ikke bare etter en feilet
             # lagring) – oppdaterer seg selv idet man skriver en kommentar,
             # uten noen egen "sist forsøkt lagret"-tilstand å holde i synk.
-            na_valgt = st.session_state.get(seg_key)
-            na_kommentar = (st.session_state.get(kom_key) or "").strip()
-            mangler_na = isinstance(na_valgt, (int, float)) and na_valgt <= 3 and not na_kommentar
+            mangler_na = _mangler_kommentar(navn, krit)
 
             tittel_farge = "color:#C8102E;" if mangler_na else ""
             st.markdown(f"<span style='{tittel_farge}font-weight:700;'>{krit}</span>" + (f"  \n_{info_k['kort']}_" if info_k.get("kort") else ""), unsafe_allow_html=True)
@@ -484,15 +631,16 @@ def vis_vurderingsvisning():
                 if info_k.get("eksempler"):
                     st.caption(info_k["eksempler"])
 
-            if seg_key not in st.session_state:
-                st.session_state[seg_key] = grid_score if isinstance(grid_score, (int, str)) else None
-            valg = st.segmented_control("Score", [1, 2, 3, 4, 5, "Kan ikke vurdere"], key=seg_key, label_visibility="collapsed")
+            valg = st.segmented_control(
+                "Score", [1, 2, 3, 4, 5, "Kan ikke vurdere"], key=seg_key, label_visibility="collapsed",
+                on_change=_autolagre_kriterium, args=(navn, krit),
+            )
 
             pakrevd = isinstance(valg, (int, float)) and valg <= 3
             st.text_area(
-                "Kommentar", value=eksisterende.get("kommentar", ""),
-                key=kom_key, placeholder=f"Kommentar til «{krit}»" + (" – påkrevd ved lav score" if pakrevd else "…"),
-                height=68,
+                "Kommentar", key=kom_key,
+                placeholder=f"Kommentar til «{krit}»" + (" – påkrevd ved lav score" if pakrevd else "…"),
+                height=68, on_change=_autolagre_kriterium, args=(navn, krit),
             )
             if mangler_na:
                 st.markdown("<span style='color:#C8102E;font-size:13px;'>⚠ Kommentar mangler</span>", unsafe_allow_html=True)
@@ -501,10 +649,12 @@ def vis_vurderingsvisning():
     st.divider()
     st.markdown("**Generell kommentar om butikken**")
     generell_key = f"generell_{navn}"
-    min_generell = next((g["kommentar"] for g in generell_per_butikk.get(navn, []) if g["jurymedlem"] == jurynavn), "")
     if generell_key not in st.session_state:
-        st.session_state[generell_key] = min_generell
-    st.text_area("Din generelle kommentar", key=generell_key, placeholder="Valgfri generell kommentar om hele butikken …", height=68, label_visibility="collapsed")
+        st.session_state[generell_key] = _min_generell(navn)
+    st.text_area(
+        "Din generelle kommentar", key=generell_key, placeholder="Valgfri generell kommentar om hele butikken …", height=68,
+        label_visibility="collapsed", on_change=_autolagre_generell, args=(navn,),
+    )
     andre = [g for g in generell_per_butikk.get(navn, []) if g["jurymedlem"] != jurynavn]
     if andre:
         with st.expander(f"Se andres generelle kommentarer ({len(andre)})"):
@@ -512,12 +662,7 @@ def vis_vurderingsvisning():
                 st.caption(f"**{g['jurymedlem']}** ({g['sist_endret']}): {g['kommentar']}")
 
     st.write("")
-    antall_mangler_na = sum(
-        1 for k in mine_kriterier_flat
-        if isinstance(st.session_state.get(f"seg_{navn}_{k}"), (int, float))
-        and st.session_state.get(f"seg_{navn}_{k}") <= 3
-        and not (st.session_state.get(f"kom_krit_{navn}_{k}") or "").strip()
-    )
+    antall_mangler_na = sum(1 for k in mine_kriterier_flat if _mangler_kommentar(navn, k))
     if antall_mangler_na:
         ord = "kriterium" if antall_mangler_na == 1 else "kriterier"
         st.markdown(f"<span style='color:#C8102E;font-weight:600;'>⚠ {antall_mangler_na} {ord} mangler kommentar</span>", unsafe_allow_html=True)
@@ -525,6 +670,7 @@ def vis_vurderingsvisning():
     tilstand = st.session_state.get("_lagringstilstand")
     if tilstand:
         lagringsstatus(tilstand[0], tilstand[1])
+    _vis_autolagring()
 
     # NB: IKKE on_click-callbacks her – Streamlit behandler st.rerun() kalt
     # INNE i en on_click-callback som en no-op (bekreftet empirisk: en
@@ -595,6 +741,30 @@ def vis_vurderingsvisning():
 
 FANE_STATUS = {"gjenstar": "Ikke startet", "pabegynt": "Påbegynt", "ferdig": "Ferdig", "alle": None}
 FANE_REKKEFOLGE = {"Påbegynt": 0, "Ikke startet": 1, "Ferdig": 2}
+KLASSE_REKKEFOLGE = {k: i for i, k in enumerate(KLASSER)}
+SORTERING = {"status": "Status", "storrelse": "Størrelse (liten → stor)", "navn": "Navn (A–Å)"}
+
+
+def _husket(key, default):
+    """Streamlit nullstiller et nøklet widgets verdi når widgeten ikke
+    rendres i en kjøring (f.eks. mens en butikk er åpen) – derfor seedes
+    nøkkelen fra en vanlig «_sist»-kopi som overlever. Se samme mønster for
+    fane-valget i vis_butikkliste()."""
+    if key not in st.session_state:
+        st.session_state[key] = st.session_state.get(f"{key}_sist", default)
+
+
+def _husk(key):
+    st.session_state[f"{key}_sist"] = st.session_state.get(key)
+
+
+def vis_storrelsesfilter():
+    _husket("_vurdering_storrelse", [])
+    st.pills(
+        "Størrelse", KLASSER, selection_mode="multi", key="_vurdering_storrelse",
+        format_func=lambda k: f"{KLASSE_IKON.get(k, '')} {k}", label_visibility="collapsed",
+    )
+    _husk("_vurdering_storrelse")
 
 
 def vis_butikkliste():
@@ -625,9 +795,21 @@ def vis_butikkliste():
     with fc2:
         sok = st.text_input("Søk", placeholder="Søk etter butikk …", icon=":material/search:", label_visibility="collapsed")
 
-    # Nullstill paginering når fane/søk faktisk ENDRES (ikke når man bare går
-    # tilbake til lista igjen – da skal man stå på samme «posisjon»).
-    nokkel = (fane, sok)
+    sc1, sc2 = st.columns([3, 2], vertical_alignment="center")
+    with sc1:
+        vis_storrelsesfilter()
+    with sc2:
+        _husket("_vurdering_sortering", "status")
+        sortering = st.selectbox(
+            "Sorter etter", list(SORTERING), key="_vurdering_sortering", format_func=SORTERING.get,
+            label_visibility="collapsed",
+        )
+        _husk("_vurdering_sortering")
+    storrelser = _storrelser_valgt()
+
+    # Nullstill paginering når fane/søk/filter faktisk ENDRES (ikke når man
+    # bare går tilbake til lista igjen – da skal man stå på samme «posisjon»).
+    nokkel = (fane, sok, tuple(storrelser), sortering)
     if st.session_state.get("_vurdering_forrige_filter") != nokkel:
         st.session_state["_vurdering_vis_antall"] = 20
         st.session_state["_vurdering_forrige_filter"] = nokkel
@@ -637,7 +819,13 @@ def vis_butikkliste():
     navn_filtrert = [n for n in navn_liste_butikker if (onsket_status is None or status(n) == onsket_status)]
     if sok:
         navn_filtrert = [n for n in navn_filtrert if sok.lower() in n.lower()]
-    navn_filtrert.sort(key=lambda n: (FANE_REKKEFOLGE.get(status(n), 9), n))
+    navn_filtrert = [n for n in navn_filtrert if _innenfor_filter(n)]
+    if sortering == "storrelse":
+        navn_filtrert.sort(key=lambda n: (KLASSE_REKKEFOLGE.get(butikker[n].get("klasse"), 9), FANE_REKKEFOLGE.get(status(n), 9), n))
+    elif sortering == "navn":
+        navn_filtrert.sort(key=str.lower)
+    else:
+        navn_filtrert.sort(key=lambda n: (FANE_REKKEFOLGE.get(status(n), 9), n))
 
     st.write("")
     if not navn_filtrert:
@@ -645,6 +833,9 @@ def vis_butikkliste():
             "gjenstar": "Ingen gjenstående butikker 🎉", "pabegynt": "Ingen påbegynte butikker",
             "ferdig": "Ingen ferdige butikker ennå", "alle": "Ingen butikker matcher søket",
         }
+        if storrelser:
+            st.caption("Ingen treff med valgt størrelse – fjern filteret for å se flere.")
+            return
         if fane == "alle" and not sok:
             tom_tekst["alle"] = "Alt er ferdig vurdert 🎉" if antall_ferdig == len(navn_liste_butikker) else "Ingen butikker funnet"
         st.caption(tom_tekst.get(fane, "Ingen treff"))
@@ -690,8 +881,128 @@ def vis_butikkliste():
             st.rerun()
 
 
+@st.fragment
+def vis_per_kriterium():
+    """Ett kriterium, alle mine butikker under hverandre – for jurymedlemmer
+    som går gjennom ett og ett kriterium på tvers av butikkene. Samme
+    widget-nøkler og samme autolagring som «Per butikk», så det man fyller
+    inn her, står også der (og omvendt). Fragment: en autolagring kjører
+    bare denne delen på nytt, ikke hele siden."""
+    def _etikett(krit):
+        besvart = sum(1 for n in navn_liste_butikker if _innenfor_filter(n) and _min_score(n, krit) is not None)
+        totalt = sum(1 for n in navn_liste_butikker if _innenfor_filter(n))
+        return f"{krit_til_fagfelt.get(krit, '')} · {krit}  ({besvart}/{totalt})"
+
+    _husket("_vk_kriterium", mine_kriterier_flat[0])
+    if st.session_state["_vk_kriterium"] not in mine_kriterier_flat:
+        st.session_state["_vk_kriterium"] = mine_kriterier_flat[0]
+    kc1, kc2 = st.columns([4, 1], vertical_alignment="bottom")
+    with kc1:
+        krit = st.selectbox("Kriterium", mine_kriterier_flat, key="_vk_kriterium", format_func=_etikett)
+    _husk("_vk_kriterium")
+    idx = mine_kriterier_flat.index(krit)
+    def _ga_til_neste_kriterium(neste):
+        # Callback (ikke vanlig if-knapp): nøkkelen til selectboksen over kan
+        # ikke endres etter at widgeten er tegnet i samme kjøring.
+        st.session_state["_vk_kriterium"] = neste
+        st.session_state["_vk_kriterium_sist"] = neste
+
+    with kc2:
+        if idx + 1 < len(mine_kriterier_flat):
+            st.button(
+                "Neste kriterium →", use_container_width=True,
+                on_click=_ga_til_neste_kriterium, args=(mine_kriterier_flat[idx + 1],),
+            )
+
+    info_k = kriterium_info.get(krit, {})
+    farge = FAGFELT_FARGE.get(krit_til_fagfelt.get(krit), "#888")
+    st.markdown(
+        f'<div style="border-left:4px solid {farge};padding-left:10px;margin:6px 0 4px 0;"><b>{krit}</b>'
+        + (f'<br><span style="color:var(--tekst-dempet);font-size:14px;">{info_k["kort"]}</span>' if info_k.get("kort") else "")
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    with st.popover("Les mer om kriteriet og skalaen", icon=":material/help:"):
+        if info_k.get("utfyllende"):
+            st.markdown(info_k["utfyllende"])
+        st.markdown(f"**1:** {info_k.get('skala1', '–')}")
+        st.markdown(f"**3:** {info_k.get('skala3', '–')}")
+        st.markdown(f"**5:** {info_k.get('skala5', '–')}")
+        if info_k.get("eksempler"):
+            st.caption(info_k["eksempler"])
+
+    fc1, fc2 = st.columns([3, 2], vertical_alignment="center")
+    with fc1:
+        vis_storrelsesfilter()
+    with fc2:
+        _husket("_vk_vis", "alle")
+        vis = st.segmented_control(
+            "Vis", ["alle", "ikke_vurdert"], key="_vk_vis", label_visibility="collapsed",
+            format_func={"alle": "Alle butikker", "ikke_vurdert": "Ikke vurdert ennå"}.get,
+        )
+        _husk("_vk_vis")
+
+    navn_her = [n for n in navn_liste_butikker if _innenfor_filter(n)]
+    if vis == "ikke_vurdert":
+        navn_her = [n for n in navn_her if _min_score(n, krit) is None]
+    navn_her.sort(key=lambda n: (KLASSE_REKKEFOLGE.get(butikker[n].get("klasse"), 9), n.lower()))
+
+    nokkel = (krit, tuple(_storrelser_valgt()), vis)
+    if st.session_state.get("_vk_forrige_filter") != nokkel:
+        st.session_state["_vk_vis_antall"] = 20
+        st.session_state["_vk_forrige_filter"] = nokkel
+    vis_antall = st.session_state.get("_vk_vis_antall", 20)
+
+    _vis_autolagring()
+    st.caption("Svarene lagres automatisk – score med en gang, kommentar når du går ut av feltet.")
+    if not navn_her:
+        st.caption("Alle butikkene er vurdert på dette kriteriet 🎉" if vis == "ikke_vurdert" else "Ingen butikker med valgt størrelse.")
+        return
+
+    for navn in navn_her[:vis_antall]:
+        info = butikker[navn]
+        _seed_kriterium(navn, krit)
+        slug = "".join(ch for ch in navn.lower() if ch.isalnum()) or "butikk"
+        with st.container(key=f"kritrad_{slug}", border=True):
+            c1, c2 = st.columns([2, 3])
+            with c1:
+                st.markdown(f'<div class="butikk-navn">{navn}</div><div class="butikk-bransje">{info.get("bransje", "–")}</div>', unsafe_allow_html=True)
+                klasse_badge(info.get("klasse", "–"))
+                if info.get("url"):
+                    st.link_button("Besøk ↗", info["url"], icon=":material/open_in_new:")
+            with c2:
+                valg = st.segmented_control(
+                    "Score", [1, 2, 3, 4, 5, "Kan ikke vurdere"], key=f"seg_{navn}_{krit}", label_visibility="collapsed",
+                    on_change=_autolagre_kriterium, args=(navn, krit),
+                )
+                pakrevd = isinstance(valg, (int, float)) and valg <= 3
+                st.text_area(
+                    "Kommentar", key=f"kom_krit_{navn}_{krit}", height=68, label_visibility="collapsed",
+                    placeholder="Kommentar" + (" – påkrevd ved lav score" if pakrevd else " …"),
+                    on_change=_autolagre_kriterium, args=(navn, krit),
+                )
+                if _mangler_kommentar(navn, krit):
+                    st.markdown("<span style='color:#C8102E;font-size:13px;'>⚠ Kommentar mangler</span>", unsafe_allow_html=True)
+
+    if len(navn_her) > vis_antall:
+        if st.button(f"Vis flere ({len(navn_her) - vis_antall} igjen)", use_container_width=True, key="_vk_vis_flere"):
+            st.session_state["_vk_vis_antall"] = vis_antall + 20
+            st.rerun(scope="fragment")
+
+
+VISNINGER = {"butikk": "Per butikk", "kriterium": "Per kriterium"}
+
 if st.session_state.get("_apnet_butikk"):
     with st.container(border=True):
         vis_vurderingsvisning()
 else:
-    vis_butikkliste()
+    _husket("_vurdering_visning", "butikk")
+    visning = st.segmented_control(
+        "Visning", list(VISNINGER), key="_vurdering_visning", format_func=VISNINGER.get,
+        help="«Per butikk»: alle kriteriene for én butikk om gangen. «Per kriterium»: ett kriterium, alle butikkene under hverandre.",
+    )
+    _husk("_vurdering_visning")
+    if visning == "kriterium":
+        vis_per_kriterium()
+    else:
+        vis_butikkliste()

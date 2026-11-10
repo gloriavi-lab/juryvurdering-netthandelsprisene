@@ -3,10 +3,11 @@ butikker og logger funn steg for steg (5 steg i en tidslinje + én generell
 kommentar om butikken). Hvert steg lagres for seg (ett skrivekall per
 lagring, se sheets.write_testkjop_steg) – ikke én stor skjema-innsending.
 
-«Kjøp og levering» er bevisst et slått-sammen steg (tidligere Kassen+
-Levering+Utpakking) – se jury.beregn_testkjop_status for hvordan status
-utledes fra feltene INNENFOR det. Retur og Pengene tilbake er fortsatt to
-separate steg.
+«Kjøp» og «Levering» er to separate steg (de var en periode slått sammen
+til «Kjøp og levering» – gamle rader fordeles automatisk, se
+jury.normaliser_testkjop_steg). Oppsummeringen nederst er en sjekkliste
+over HELE testkjøpet: hvert steg med sine underpunkter, krysset av etter
+hvert som de fylles ut.
 
 Alt lagres per (butikk, jurymedlem), så to jurymedlemmer kan testkjøpe hos
 samme butikk uten å overskrive hverandre – de får hver sin egen tidslinje."""
@@ -18,10 +19,13 @@ import streamlit as st
 
 from components import kopier_knapp, topptekst, tom_tilstand, vis_feil
 from data import naa_norsk
-from jury import beregn_dager_til_refusjon, beregn_leveringsavvik, beregn_svartid, beregn_testkjop_status, read_jury
+from jury import (
+    beregn_dager_til_refusjon, beregn_leveringsavvik, beregn_svartid, beregn_testkjop_status, normaliser_testkjop_steg,
+    read_jury,
+)
 from pptx_eksport import bygg_testkjop_slide
 from sheets import (
-    read_stores, read_testkjop, read_testkjop_kundeservice, read_testkjop_tildeling, slett_testkjop_kundeservice_kanal,
+    TESTKJOP_TIDSLINJE_STEG, read_stores, read_testkjop, read_testkjop_kundeservice, read_testkjop_tildeling, slett_testkjop_kundeservice_kanal,
     write_testkjop_kundeservice_kanal, write_testkjop_steg,
 )
 
@@ -99,7 +103,7 @@ if st.button("← Alle mine testkjøp-butikker"):
     st.session_state["_tk_apent_steg"] = None
     st.rerun()
 
-alle_steg = testkjop_data.get((apnet_butikk, jurynavn), {})
+alle_steg = normaliser_testkjop_steg(testkjop_data.get((apnet_butikk, jurynavn), {}))
 status = beregn_testkjop_status(alle_steg)
 
 dc1, dc2 = st.columns([4, 1])
@@ -129,12 +133,13 @@ if st.button("Lagre kommentar", icon=":material/save:", key=f"tk_{apnet_butikk}_
 
 st.divider()
 
-TIDSLINJE_STEG = ["Kjøp og levering", "Kommunikasjon", "Kundeservice", "Retur", "Pengene tilbake"]
+TIDSLINJE_STEG = TESTKJOP_TIDSLINJE_STEG
+STEG_PER_RAD = 3
 
-# ── Tidslinje: klikkbare steg, radvis (ny kolonnerad per 4 – holder rekkefølgen riktig når kolonnene stables på mobil) ──
-for rad_start in range(0, len(TIDSLINJE_STEG), 4):
-    steg_kolonner = st.columns(4)
-    for j, steg in enumerate(TIDSLINJE_STEG[rad_start:rad_start + 4]):
+# ── Tidslinje: klikkbare steg, radvis (ny kolonnerad per 3 – holder rekkefølgen riktig når kolonnene stables på mobil) ──
+for rad_start in range(0, len(TIDSLINJE_STEG), STEG_PER_RAD):
+    steg_kolonner = st.columns(STEG_PER_RAD)
+    for j, steg in enumerate(TIDSLINJE_STEG[rad_start:rad_start + STEG_PER_RAD]):
         i = rad_start + j
         ferdig = steg in alle_steg
         merke = f"✓ {steg}" if ferdig else f"{i + 1}. {steg}"
@@ -148,12 +153,15 @@ if _apent_steg:
 
 st.divider()
 
-SCORE_VALG = ["1", "2", "3", "4", "5", "Ikke aktuelt"]
+# "" = ikke valgt ennå. Før sto «1» forhåndsvalgt, slik at et steg som ble
+# lagret uten at noen faktisk valgte score, fikk score 1 – det trakk ned
+# snittet og gjorde at sjekklisten ikke kunne se om score var satt.
+SCORE_VALG = ["", "1", "2", "3", "4", "5", "Ikke aktuelt"]
 
 
 def _score_widget(key, eksisterende=""):
     idx = SCORE_VALG.index(eksisterende) if eksisterende in SCORE_VALG else 0
-    return st.selectbox("Score", SCORE_VALG, index=idx, key=key)
+    return st.selectbox("Score", SCORE_VALG, index=idx, key=key, format_func=lambda v: v or "– Velg score –")
 
 
 def _tidspunkt_widgets(key_prefix, eksisterende="", label="Tidspunkt"):
@@ -203,11 +211,13 @@ def _render_felt(feltnavn, typ, label, key_prefix, eksisterende):
 
 
 STEG_FELT_SPEC = {
-    "Kjøp og levering": [
+    "Kjøp": [
         ("ETA vist", "ja_nei", "ETA vist?"),
         ("Lovet leveringsdato", "date", "Lovet leveringsdato"),
         ("Måtte opprette konto", "ja_nei", "Måtte opprette konto?"),
         ("Totalpris vist", "ja_nei", "Totalpris vist før betaling?"),
+    ],
+    "Levering": [
         ("Faktisk leveringsdato", "date", "Faktisk leveringsdato"),
         ("Emballasje", "text", "Emballasje (beskrivelse)"),
         ("Produkt som beskrevet", "ja_nei", "Produkt som beskrevet?"),
@@ -221,7 +231,6 @@ STEG_FELT_SPEC = {
     ],
     "Retur": [
         ("Har returløsning", "returlosning", "Har returløsning?"),
-        ("Avstand innlevering", "text", "Avstand til innleveringssted (km eller fritekst)"),
         ("Beskjed retur mottatt", "ja_nei", "Beskjed om at retur er mottatt?"),
         ("Beskjed retur tidspunkt", "tidspunkt", "Tidspunkt for beskjeden om at retur er mottatt"),
     ],
@@ -236,8 +245,8 @@ def _render_generisk_steg(steg):
     eksisterende = alle_steg.get(steg, {})
     key_prefix = f"tk_{apnet_butikk}_{jurynavn}_{steg}".replace(" ", "_")
 
-    if steg == "Kjøp og levering":
-        lovet = eksisterende.get("Lovet leveringsdato", "")
+    if steg == "Levering":
+        lovet = alle_steg.get("Kjøp", {}).get("Lovet leveringsdato", "")
         faktisk_na = eksisterende.get("Faktisk leveringsdato", "")
         if lovet and faktisk_na:
             avvik = beregn_leveringsavvik(lovet, faktisk_na)
@@ -251,13 +260,16 @@ def _render_generisk_steg(steg):
             if dager is not None:
                 st.info(f"{dager} dag{'er' if dager != 1 else ''} fra innlevering til refusjon.", icon=":material/payments:")
 
-    # «Kommunikasjon» og «Pengene tilbake» har ikke eget tidspunkt –
-    # «Ordrebekreftelse mottatt» / «Dato for refusjon» er det som er
-    # relevant der. «Retur» sitt tidspunkt har en egen, tydeligere etikett
+    # «Kommunikasjon», «Levering» og «Pengene tilbake» har ikke eget
+    # tidspunkt – «Ordrebekreftelse mottatt» / «Faktisk leveringsdato» /
+    # «Dato for refusjon» er det som er relevant der. «Retur» sitt tidspunkt har en egen, tydeligere etikett
     # siden det lett forveksles med det separate «Tidspunkt for beskjeden»-
     # feltet lenger ned (de to måler ulike ting - se STEG_FELT_SPEC).
-    TIDSPUNKT_LABEL = {"Retur": "Tidspunkt returen ble sendt (brukes til å beregne dager til refusjon)"}
-    viser_tidspunkt = steg not in ("Kommunikasjon", "Pengene tilbake")
+    TIDSPUNKT_LABEL = {
+        "Kjøp": "Tidspunkt for kjøpet",
+        "Retur": "Tidspunkt returen ble sendt (brukes til å beregne dager til refusjon)",
+    }
+    viser_tidspunkt = steg not in ("Kommunikasjon", "Levering", "Pengene tilbake")
     tidspunkt = (
         _tidspunkt_widgets(f"{key_prefix}_tidspunkt", eksisterende.get("Tidspunkt", ""), label=TIDSPUNKT_LABEL.get(steg, "Tidspunkt"))
         if viser_tidspunkt else ""
@@ -391,8 +403,9 @@ def _beregn_nokkeltall():
     tekstoppsummeringen og PowerPoint-eksporten, så beregningen kun skjer
     ett sted."""
     linjer = []
-    kjop = alle_steg.get("Kjøp og levering", {})
-    avvik = beregn_leveringsavvik(kjop.get("Lovet leveringsdato", ""), kjop.get("Faktisk leveringsdato", ""))
+    avvik = beregn_leveringsavvik(
+        alle_steg.get("Kjøp", {}).get("Lovet leveringsdato", ""), alle_steg.get("Levering", {}).get("Faktisk leveringsdato", ""),
+    )
     if avvik:
         linjer.append(("Leveringsavvik", avvik))
 
@@ -421,6 +434,30 @@ def _beregn_nokkeltall():
     return linjer, rodt_flagg
 
 
+def _utfylt(verdi):
+    return bool(str(verdi or "").strip())
+
+
+def _beregn_sjekkliste():
+    """Sjekkliste for HELE testkjøpet: [(steg, [(punkt, utført), ...]), ...]
+    i tidslinjens rekkefølge. Punktene er nøyaktig de feltene juryen fyller
+    ut i hvert steg (STEG_FELT_SPEC) + at en score er satt – slik at
+    sjekklisten aldri kan drifte fra selve skjemaet. Kommentarer er
+    valgfrie og telles derfor ikke med. Generell kommentar står som et
+    eget punkt først."""
+    liste = [("Generelt", [("Generell kommentar om butikken", _utfylt(alle_steg.get("Generell kommentar", {}).get("Kommentar")))])]
+    for steg in TIDSLINJE_STEG:
+        d = alle_steg.get(steg, {})
+        if steg == "Kundeservice":
+            antall = len(kundeservice_data.get((apnet_butikk, jurynavn), []))
+            punkter = [(f"Minst 2 kanaler testet ({min(antall, 2)} av 2)", antall >= 2)]
+        else:
+            punkter = [(label.rstrip("?"), _utfylt(d.get(felt))) for felt, _, label in STEG_FELT_SPEC.get(steg, [])]
+        punkter.append(("Score satt", _utfylt(d.get("Score"))))
+        liste.append((steg, punkter))
+    return liste
+
+
 def _bygg_oppsummering_tekst(nokkeltall, rodt_flagg):
     linjer = [f"TESTKJØP – {apnet_butikk} ({jurynavn})", f"Status: {status}", ""]
 
@@ -429,14 +466,18 @@ def _bygg_oppsummering_tekst(nokkeltall, rodt_flagg):
         linjer.append(f"Generelt inntrykk: {generell}")
         linjer.append("")
 
-    linjer.append("Tidslinje:")
-    for steg in TIDSLINJE_STEG:
-        d = alle_steg.get(steg)
-        if d:
-            nar = f" – {d['Tidspunkt']}" if d.get("Tidspunkt") else ""
-            linjer.append(f"  ✓ {steg}{nar} – Score: {d.get('Score', '–')}")
-        else:
-            linjer.append(f"  ○ {steg} – ikke utført")
+    sjekkliste = _beregn_sjekkliste()
+    antall_ok = sum(ok for _, punkter in sjekkliste for _, ok in punkter)
+    antall_tot = sum(len(punkter) for _, punkter in sjekkliste)
+    linjer.append(f"Sjekkliste ({antall_ok} av {antall_tot} punkter):")
+    for steg, punkter in sjekkliste:
+        ok_her = sum(ok for _, ok in punkter)
+        d = alle_steg.get(steg, {})
+        nar = f" – {d['Tidspunkt']}" if d.get("Tidspunkt") else ""
+        score = f" – Score: {d['Score']}" if d.get("Score") else ""
+        linjer.append(f"  {'✓' if ok_her == len(punkter) else '○'} {steg} ({ok_her}/{len(punkter)}){nar}{score}")
+        for punkt, ok in punkter:
+            linjer.append(f"      {'☑' if ok else '☐'} {punkt}")
     linjer.append("")
 
     for etikett, verdi in nokkeltall:
@@ -473,27 +514,44 @@ def _render_oppsummering_kort(nokkeltall, rodt_flagg):
     if generell:
         deler.append(f'<div class="tk-opp-sitat">«{_escape(generell)}»</div>')
 
-    # Tidslinjen som en koblet stepper: hvert steg er en sirkel (✓ hvis
-    # utført, ellers stegnummer) forbundet med en loddrett linje ned til
-    # neste steg, slik det ser ut i en vanlig leveringssporing.
-    deler.append('<div class="tk-opp-seksjon-tittel">Tidslinje</div><div class="tk-opp-tidslinje">')
-    siste_indeks = len(TIDSLINJE_STEG) - 1
-    for i, steg in enumerate(TIDSLINJE_STEG):
-        d = alle_steg.get(steg)
-        ferdig = bool(d)
-        dot_klasse = " ferdig" if ferdig else ""
-        dot_innhold = "✓" if ferdig else str(i + 1)
-        linje_html = f'<div class="tk-opp-linje{" ferdig" if ferdig else ""}"></div>' if i < siste_indeks else ""
-        score_html = (
-            f'<div class="tk-opp-steg-score">Score {_escape(str(d.get("Score") or "–"))}</div>' if ferdig
-            else '<div class="tk-opp-steg-score tk-dempet">Ikke utført</div>'
+    # Sjekklisten som en koblet stepper (sirkel per steg, forbundet med en
+    # loddrett linje): grønn ✓ når alle punktene i steget er utført, gul med
+    # antall når det er påbegynt, grå med stegnummer når ingenting er gjort.
+    # Under hvert steg står underpunktene, krysset av enkeltvis.
+    sjekkliste = _beregn_sjekkliste()
+    antall_ok = sum(ok for _, punkter in sjekkliste for _, ok in punkter)
+    antall_tot = sum(len(punkter) for _, punkter in sjekkliste)
+    andel = antall_ok / antall_tot if antall_tot else 0
+    deler.append(
+        f'<div class="tk-opp-seksjon-tittel">Sjekkliste for testkjøpet</div>'
+        f'<div class="tk-opp-fremdrift"><div class="fremdrift-bakgrunn"><div class="fremdrift-fyll" style="width:{andel * 100:.0f}%;"></div></div>'
+        f'<div class="tk-opp-fremdrift-tekst">{antall_ok} av {antall_tot} punkter</div></div>'
+        '<div class="tk-opp-tidslinje">'
+    )
+    siste_indeks = len(sjekkliste) - 1
+    for i, (steg, punkter) in enumerate(sjekkliste):
+        ok_her = sum(ok for _, ok in punkter)
+        if ok_her == len(punkter):
+            dot_klasse, dot_innhold = " ferdig", "✓"
+        elif ok_her:
+            dot_klasse, dot_innhold = " delvis", str(i) if i else "•"
+        else:
+            dot_klasse, dot_innhold = "", str(i) if i else "•"
+        linje_html = f'<div class="tk-opp-linje{" ferdig" if dot_klasse == " ferdig" else ""}"></div>' if i < siste_indeks else ""
+        score = alle_steg.get(steg, {}).get("Score")
+        meta = f"{ok_her} av {len(punkter)}" + (f" · Score {_escape(str(score))}" if score else "")
+        punkt_html = "".join(
+            f'<li class="tk-opp-punkt{" ok" if ok else ""}"><span class="tk-opp-boks">{"✓" if ok else ""}</span>{_escape(punkt)}</li>'
+            for punkt, ok in punkter
         )
         innhold_stil = ' style="padding-bottom:0"' if i == siste_indeks else ""
         deler.append(
             f'<div class="tk-opp-steg">'
             f'<div class="tk-opp-dot-col"><div class="tk-opp-dot{dot_klasse}">{dot_innhold}</div>{linje_html}</div>'
             f'<div class="tk-opp-steg-innhold"{innhold_stil}>'
-            f'<div class="tk-opp-steg-navn{" tk-dempet" if not ferdig else ""}">{_escape(steg)}</div>{score_html}</div>'
+            f'<div class="tk-opp-steg-navn{" tk-dempet" if not ok_her else ""}">{_escape(steg)}</div>'
+            f'<div class="tk-opp-steg-score">{meta}</div>'
+            f'<ul class="tk-opp-punkter">{punkt_html}</ul></div>'
             f"</div>"
         )
     deler.append("</div>")

@@ -5,7 +5,13 @@
 primaryColor = "#00703C"
 font = "Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
 baseRadius = "0.75rem"
-# backgroundColor/textColor er bevisst IKKE satt – da bruker Streamlit sine
-# innebygde lys/mørk-fargesett (styrt av brukerens system/app-innstilling),
-# slik at appen fungerer fint i begge. Egendefinerte kort/klasser i styles.py
-# følger samme valg via en prefers-color-scheme-regel.
+# Appen er LÅST til lys modus (vedtatt etter tilbakemeldinger fra juryen om
+# at mørk modus ikke fungerte): Streamlit sin egen temavelger og nettleserens/
+# OS-ets prefers-color-scheme kunne stå på hver sin innstilling, slik at
+# egne kort fikk mørke farger på lys bakgrunn (eller omvendt). Med base =
+# "light" + ingen prefers-color-scheme-regel i styles.py ser appen lik ut
+# for alle.
+base = "light"
+backgroundColor = "#FAFAF9"
+secondaryBackgroundColor = "#F0EFEC"
+textColor = "#1C1C1C"

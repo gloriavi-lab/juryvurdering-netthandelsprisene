@@ -78,13 +78,36 @@ FORSTE_DATARAD = 3  # rad 1-2 er overskrifter, se modulens docstring
 _API_KALL_LOGG = deque(maxlen=500)
 
 
+# Ventetider (sekunder) før nye forsøk når Google svarer 429 «for mange
+# forespørsler». Lagt til sammen med automatisk lagring i Vurdering: alle
+# jurymedlemmer deler ÉN tjenestekonto og dermed ÉN minuttkvote, så et kort
+# overtramp skal gi et lite opphold – ikke en feilmelding og tapt lagring.
+# Bevisst kort (maks ~15 s totalt) så siden aldri henger lenge.
+_KVOTE_VENTETIDER = (1, 2, 4, 8)
+
+
+def _er_kvotefeil(feil):
+    respons = getattr(feil, "response", None)
+    return getattr(respons, "status_code", None) == 429
+
+
 def _instrumenter_klient(gc):
     opprinnelig_request = gc.http_client.request
+
+    def _med_kvote_retry(method, endpoint, *args, **kwargs):
+        for ventetid in _KVOTE_VENTETIDER:
+            try:
+                return opprinnelig_request(method, endpoint, *args, **kwargs)
+            except gspread.exceptions.APIError as e:
+                if not _er_kvotefeil(e):
+                    raise
+                time.sleep(ventetid)
+        return opprinnelig_request(method, endpoint, *args, **kwargs)
 
     def _med_tidtaking(method, endpoint, *args, **kwargs):
         start = time.monotonic()
         try:
-            return opprinnelig_request(method, endpoint, *args, **kwargs)
+            return _med_kvote_retry(method, endpoint, *args, **kwargs)
         finally:
             _API_KALL_LOGG.append({
                 "tid": naa_norsk().strftime("%H:%M:%S"),
@@ -1768,20 +1791,21 @@ TESTKJOP_TILDELING_FANE = "Testkjøp-tildeling"
 TESTKJOP_TILDELING_HEADER = ["Jurymedlem", "Butikk"]
 
 TESTKJOP_FANE = "Testkjøp"
-# Stegene som vises i selve tidslinjen, i rekkefølge. «Kjøp og levering»
-# dekker tidligere Kassen+Levering+Utpakking – slått sammen til ett
-# steg/én rad. Retur og Pengene tilbake er fortsatt TO separate steg (se
-# jury.beregn_testkjop_status for statusutledningen).
-TESTKJOP_TIDSLINJE_STEG = ["Kjøp og levering", "Kommunikasjon", "Kundeservice", "Retur", "Pengene tilbake"]
+# Stegene som vises i selve tidslinjen, i rekkefølge. «Kjøp» og «Levering»
+# var en periode slått sammen til ett steg («Kjøp og levering») – delt opp
+# igjen etter innspill fra juryen, siden det er to steg som skjer på ulike
+# dager. Gamle rader med Steg = «Kjøp og levering» leses fortsatt inn (se
+# jury.normaliser_testkjop_steg) – ingenting i arket må endres manuelt.
+TESTKJOP_TIDSLINJE_STEG = ["Kjøp", "Kommunikasjon", "Levering", "Kundeservice", "Retur", "Pengene tilbake"]
 TESTKJOP_FELLES_KOLONNER = ["Butikk", "Jurymedlem", "Steg", "Tidspunkt", "Score", "Kommentar"]
-# Steg-spesifikke kolonner, én kolonne per felt. Kolonnenavnene er uendret
-# fra før sammenslåingen av Kassen+Levering+Utpakking (ingen skjemaendring
-# nødvendig) - kun hvilket steg-NAVN som eier DEM er endret.
+# Steg-spesifikke kolonner, én kolonne per felt. «Avstand innlevering» er
+# fjernet fra skjemaet – står den fortsatt i en eksisterende fane, blir den
+# bare stående (og skrives tom ved neste lagring av Retur-steget).
 TESTKJOP_STEG_KOLONNER = [
-    "ETA vist", "Lovet leveringsdato", "Måtte opprette konto", "Totalpris vist",  # «Kjøp og levering»
-    "Faktisk leveringsdato", "Emballasje", "Produkt som beskrevet", "Returinfo i pakken",  # «Kjøp og levering»
+    "ETA vist", "Lovet leveringsdato", "Måtte opprette konto", "Totalpris vist",  # «Kjøp»
+    "Faktisk leveringsdato", "Emballasje", "Produkt som beskrevet", "Returinfo i pakken",  # «Levering»
     "Ordrebekreftelse mottatt", "Info om retur", "Mersalg", "Råd og tips",  # «Kommunikasjon»
-    "Har returløsning", "Avstand innlevering", "Beskjed retur mottatt", "Beskjed retur tidspunkt",  # «Retur»
+    "Har returløsning", "Beskjed retur mottatt", "Beskjed retur tidspunkt",  # «Retur»
     "Dato refusjon", "Fikk beskjed refusjon",  # «Pengene tilbake»
 ]
 TESTKJOP_HEADER = TESTKJOP_FELLES_KOLONNER + TESTKJOP_STEG_KOLONNER + ["Sist endret"]
@@ -1790,14 +1814,16 @@ TESTKJOP_HEADER = TESTKJOP_FELLES_KOLONNER + TESTKJOP_STEG_KOLONNER + ["Sist end
 # farge per steg-gruppe - gir Testkjøp-fanen en lignende gruppert, farget
 # følelse som Rangering ekspertvurdering.
 TESTKJOP_GRUPPE_FARGE = {
-    "Kjøp og levering": "#4472C4", "Kommunikasjon": "#70AD47", "Retur": "#ED7D31", "Pengene tilbake": "#7030A0",
+    "Kjøp": "#4472C4", "Levering": "#5B9BD5", "Kommunikasjon": "#70AD47", "Retur": "#ED7D31", "Pengene tilbake": "#7030A0",
 }
 _TESTKJOP_FELT_TIL_GRUPPE = {}
-for _kol in ["ETA vist", "Lovet leveringsdato", "Måtte opprette konto", "Totalpris vist", "Faktisk leveringsdato", "Emballasje", "Produkt som beskrevet", "Returinfo i pakken"]:
-    _TESTKJOP_FELT_TIL_GRUPPE[_kol] = "Kjøp og levering"
+for _kol in ["ETA vist", "Lovet leveringsdato", "Måtte opprette konto", "Totalpris vist"]:
+    _TESTKJOP_FELT_TIL_GRUPPE[_kol] = "Kjøp"
+for _kol in ["Faktisk leveringsdato", "Emballasje", "Produkt som beskrevet", "Returinfo i pakken"]:
+    _TESTKJOP_FELT_TIL_GRUPPE[_kol] = "Levering"
 for _kol in ["Ordrebekreftelse mottatt", "Info om retur", "Mersalg", "Råd og tips"]:
     _TESTKJOP_FELT_TIL_GRUPPE[_kol] = "Kommunikasjon"
-for _kol in ["Har returløsning", "Avstand innlevering", "Beskjed retur mottatt", "Beskjed retur tidspunkt"]:
+for _kol in ["Har returløsning", "Beskjed retur mottatt", "Beskjed retur tidspunkt"]:
     _TESTKJOP_FELT_TIL_GRUPPE[_kol] = "Retur"
 for _kol in ["Dato refusjon", "Fikk beskjed refusjon"]:
     _TESTKJOP_FELT_TIL_GRUPPE[_kol] = "Pengene tilbake"
