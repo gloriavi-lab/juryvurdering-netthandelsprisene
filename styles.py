@@ -183,6 +183,11 @@ div[data-testid="stForm"] {{ border: 1px solid var(--kant); border-radius: 14px;
 .tk-oppsummering {{ background:var(--kort-bakgrunn); border:1px solid var(--kant); border-radius:14px; padding:22px 24px; }}
 .tk-opp-header {{ display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:4px; }}
 .tk-opp-butikk {{ font-size:20px; font-weight:800; color:var(--tekst); }}
+.tk-opp-header-hoyre {{ display:flex; align-items:center; gap:8px; flex-wrap:wrap; }}
+.tk-opp-terning {{ display:inline-flex; align-items:center; gap:4px; font-weight:800; font-size:14px; color:var(--merke-tekst); background:color-mix(in srgb, var(--merke) 10%, transparent); border-radius:999px; padding:3px 10px; }}
+.tk-opp-terningkast {{ display:flex; align-items:center; gap:14px; background:var(--lys-bakgrunn); border-radius:10px; padding:10px 16px; }}
+.tk-opp-terning-stor {{ font-size:46px; line-height:1; color:var(--merke-tekst); }}
+.tk-opp-terning-begrunnelse {{ font-size:13.5px; color:var(--tekst); line-height:1.5; margin-top:2px; }}
 .tk-opp-sitat {{ font-style:italic; color:var(--tekst-dempet); font-size:14px; margin:10px 0 4px; line-height:1.5; border-left:3px solid var(--kant); padding-left:12px; }}
 .tk-opp-seksjon-tittel {{ font-size:11.5px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:var(--tekst-dempet); margin:20px 0 14px; }}
 /* Tidslinjen som en koblet stepper (sirkler+linjer), ikke flate rader -

@@ -9,6 +9,12 @@ jury.normaliser_testkjop_steg). Oppsummeringen nederst er en sjekkliste
 over HELE testkjøpet: hvert steg med sine underpunkter, krysset av etter
 hvert som de fylles ut.
 
+Helt til slutt gir jurymedlemmet et TERNINGKAST (1–6) for hele testkjøpet,
+med en kort begrunnelse. Det åpnes først når «Pengene tilbake» er lagret,
+lagres som en egen rad (Steg = «Terningkast», terningkastet i Score-
+kolonnen, begrunnelsen i Kommentar) og telles IKKE med i stegenes snitt
+(annen skala: 1–6 mot 1–5).
+
 Alt lagres per (butikk, jurymedlem), så to jurymedlemmer kan testkjøpe hos
 samme butikk uten å overskrive hverandre – de får hver sin egen tidslinje."""
 
@@ -390,6 +396,47 @@ if _apent_steg:
         else:
             _render_generisk_steg(_apent_steg)
 
+# ─────────────────────────────────────────────
+# Terningkast for hele testkjøpet (siste steg)
+# ─────────────────────────────────────────────
+TERNINGKAST_STEG = "Terningkast"
+TERNING = {"1": "⚀", "2": "⚁", "3": "⚂", "4": "⚃", "5": "⚄", "6": "⚅"}
+_terningkast = alle_steg.get(TERNINGKAST_STEG, {})
+_terningkast_verdi = _terningkast.get("Score", "") if _terningkast.get("Score", "") in TERNING else ""
+
+st.write("")
+with st.container(border=True):
+    st.markdown("### 🎲 Terningkast for hele testkjøpet")
+    if "Pengene tilbake" not in alle_steg and not _terningkast_verdi:
+        st.info(
+            "Terningkastet gis helt til slutt – det åpnes når steget «Pengene tilbake» er lagret.",
+            icon=":material/lock:",
+        )
+    else:
+        st.caption("Ditt samlede inntrykk av hele kjøpsopplevelsen, fra kjøp til pengene er tilbake. 1 = svært dårlig, 6 = helt utmerket.")
+        tk_key = f"tk_{apnet_butikk}_{jurynavn}_terningkast".replace(" ", "_")
+        terning_valg = st.segmented_control(
+            "Terningkast", list(TERNING), default=_terningkast_verdi or None, key=f"{tk_key}_verdi",
+            format_func=lambda v: f"{TERNING[v]} {v}", label_visibility="collapsed",
+        )
+        terning_begrunnelse = st.text_area(
+            "Begrunnelse", value=_terningkast.get("Kommentar", ""), key=f"{tk_key}_begrunnelse",
+            placeholder="Kort begrunnelse for terningkastet …",
+        )
+        if st.button("Lagre terningkast", type="primary", icon=":material/casino:", key=f"{tk_key}_lagre"):
+            if not terning_valg:
+                st.warning("Velg et terningkast først.", icon=":material/warning:")
+            else:
+                try:
+                    write_testkjop_steg(
+                        sh, apnet_butikk, jurynavn, TERNINGKAST_STEG, {"Score": terning_valg, "Kommentar": terning_begrunnelse},
+                    )
+                except Exception as e:
+                    vis_feil("Kunne ikke lagre terningkastet", e)
+                else:
+                    st.toast("Terningkast lagret", icon=":material/check_circle:")
+                    st.rerun()
+
 st.divider()
 
 # ─────────────────────────────────────────────
@@ -455,11 +502,16 @@ def _beregn_sjekkliste():
             punkter = [(label.rstrip("?"), _utfylt(d.get(felt))) for felt, _, label in STEG_FELT_SPEC.get(steg, [])]
         punkter.append(("Score satt", _utfylt(d.get("Score"))))
         liste.append((steg, punkter))
+    liste.append((TERNINGKAST_STEG, [("Terningkast gitt", bool(_terningkast_verdi))]))
     return liste
 
 
 def _bygg_oppsummering_tekst(nokkeltall, rodt_flagg):
-    linjer = [f"TESTKJØP – {apnet_butikk} ({jurynavn})", f"Status: {status}", ""]
+    linjer = [f"TESTKJØP – {apnet_butikk} ({jurynavn})", f"Status: {status}"]
+    if _terningkast_verdi:
+        begrunnelse = _terningkast.get("Kommentar", "")
+        linjer.append(f"Terningkast: {TERNING[_terningkast_verdi]} {_terningkast_verdi} av 6" + (f" – {begrunnelse}" if begrunnelse else ""))
+    linjer.append("")
 
     generell = alle_steg.get("Generell kommentar", {}).get("Kommentar", "")
     if generell:
@@ -506,7 +558,10 @@ def _render_oppsummering_kort(nokkeltall, rodt_flagg):
         '<div class="tk-oppsummering">',
         '<div class="tk-opp-header">',
         f'<div class="tk-opp-butikk">{_escape(apnet_butikk)}</div>',
-        f'<span class="status-merkelapp" style="background:color-mix(in srgb, {farge} 12%, transparent);color:{farge};">{_escape(status)}</span>',
+        '<div class="tk-opp-header-hoyre">'
+        + (f'<span class="tk-opp-terning" title="Terningkast {_terningkast_verdi} av 6">{TERNING[_terningkast_verdi]} {_terningkast_verdi}</span>' if _terningkast_verdi else "")
+        + f'<span class="status-merkelapp" style="background:color-mix(in srgb, {farge} 12%, transparent);color:{farge};">{_escape(status)}</span>'
+        + "</div>",
         "</div>",
     ]
 
@@ -565,6 +620,16 @@ def _render_oppsummering_kort(nokkeltall, rodt_flagg):
             )
         deler.append("</div>")
 
+    if _terningkast_verdi:
+        begrunnelse = _terningkast.get("Kommentar", "")
+        deler.append(
+            '<div class="tk-opp-seksjon-tittel">Terningkast</div><div class="tk-opp-terningkast">'
+            f'<div class="tk-opp-terning-stor">{TERNING[_terningkast_verdi]}</div>'
+            f'<div><div class="tk-opp-stat-verdi">{_terningkast_verdi} av 6</div>'
+            + (f'<div class="tk-opp-terning-begrunnelse">{_escape(begrunnelse)}</div>' if begrunnelse else "")
+            + "</div></div>"
+        )
+
     if rodt_flagg:
         deler.append('<div class="tk-opp-flagg">🚩 Ingen returløsning – kunden må ordne returen selv.</div>')
 
@@ -591,6 +656,7 @@ with kc2:
         pptx_bytes = bygg_testkjop_slide(
             apnet_butikk, jurynavn, status, alle_steg, TIDSLINJE_STEG, _nokkeltall, _rodt_flagg,
             generell_kommentar=alle_steg.get("Generell kommentar", {}).get("Kommentar", ""),
+            terningkast=_terningkast_verdi, terningkast_begrunnelse=_terningkast.get("Kommentar", ""),
         )
         st.download_button(
             "Last ned som PowerPoint", data=pptx_bytes, file_name=f"testkjop_{apnet_butikk}.pptx",

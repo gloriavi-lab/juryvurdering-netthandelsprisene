@@ -57,7 +57,10 @@ def _skriv(tf, tekst, storrelse=14, farge=MORK, fet=False, kursiv=False, ny_avsn
     return avsnitt
 
 
-def bygg_testkjop_slide(butikk, jurymedlem, status, alle_steg, tidslinje_steg, nokkeltall, rodt_flagg, generell_kommentar=""):
+def bygg_testkjop_slide(
+    butikk, jurymedlem, status, alle_steg, tidslinje_steg, nokkeltall, rodt_flagg, generell_kommentar="",
+    terningkast="", terningkast_begrunnelse="",
+):
     """Returnerer rå .pptx-bytes med ÉN slide for dette testkjøpet.
 
     alle_steg: {steg: {kolonnenavn: verdi}} - samme struktur som
@@ -67,7 +70,9 @@ def bygg_testkjop_slide(butikk, jurymedlem, status, alle_steg, tidslinje_steg, n
     nokkeltall: liste av (etikett, verdi)-par, FERDIGBEREGNET av kalleren
     (leveringsavvik, svartid per kanal, dager til refusjon, snitt score -
     se jury.py) - denne modulen gjør ingen egne beregninger, kun rendring.
-    rodt_flagg: bool, ferdigberegnet av kalleren."""
+    rodt_flagg: bool, ferdigberegnet av kalleren.
+    terningkast: "1"–"6" eller "" (ikke gitt ennå) – vises som en egen pille
+    i toppfeltet, med begrunnelsen rett under det generelle inntrykket."""
     pres = Presentation()
     pres.slide_width = SIDE_BREDDE
     pres.slide_height = SIDE_HOYDE
@@ -102,12 +107,32 @@ def bygg_testkjop_slide(butikk, jurymedlem, status, alle_steg, tidslinje_steg, n
     pp = _skriv(ptf, status, storrelse=13, farge=_farge(STATUS_FARGE.get(status, "888888")), fet=True, ny_avsnitt=False)
     pp.alignment = PP_ALIGN.CENTER
 
+    if terningkast:
+        tk_bredde = Inches(2.1)
+        tk_pille = slide.shapes.add_shape(
+            MSO_SHAPE.ROUNDED_RECTANGLE, SIDE_BREDDE - pille_bredde - tk_bredde - Inches(0.6), Inches(0.37), tk_bredde, Inches(0.42),
+        )
+        tk_pille.fill.solid()
+        tk_pille.fill.fore_color.rgb = HVIT
+        tk_pille.line.fill.background()
+        tk_pille.shadow.inherit = False
+        tk_pille.adjustments[0] = 0.5
+        tk_tf = tk_pille.text_frame
+        tk_tf.margin_left = tk_tf.margin_right = Inches(0.08)
+        tk_tf.word_wrap = False
+        tp = _skriv(tk_tf, f"Terningkast {terningkast}", storrelse=13, farge=GRONN, fet=True, ny_avsnitt=False)
+        tp.alignment = PP_ALIGN.CENTER
+
     # ── Generelt inntrykk (sitat rett under toppfeltet, hvis utfylt) ──
     y = Inches(1.4)
     if generell_kommentar:
         sitat_tf = _tekstboks(slide, Inches(0.45), y, SIDE_BREDDE - Inches(0.9), Inches(0.55))
         _skriv(sitat_tf, f"«{generell_kommentar}»", storrelse=13, farge=GRA, kursiv=True, ny_avsnitt=False)
         y += Inches(0.6)
+    if terningkast and terningkast_begrunnelse:
+        tk_tf = _tekstboks(slide, Inches(0.45), y, SIDE_BREDDE - Inches(0.9), Inches(0.45))
+        _skriv(tk_tf, f"Terningkast {terningkast}: {terningkast_begrunnelse}", storrelse=12, farge=GRA, ny_avsnitt=False)
+        y += Inches(0.5)
 
     venstre_bredde = Inches(7.4)
     hoyre_x = Inches(8.1)
